@@ -1,1 +1,0 @@
-../triplehuge/triple.h
