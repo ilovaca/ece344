@@ -1,0 +1,6 @@
+#include<hello.h>
+
+void hello()
+{
+   kprintf("hello world\n.");
+}
