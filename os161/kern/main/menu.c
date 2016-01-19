@@ -489,6 +489,7 @@ cmd_mainmenu(int n, char **a)
 	(void)n;
 	(void)a;
 
+
 	showmenu("OS/161 kernel menu", mainmenu);
 	return 0;
 }
@@ -500,11 +501,18 @@ static int cmd_db (int nargs, char **a) {
 	// check number of arguments, we only allow 2 arguments
 	kprintf("number of arguments %d\n", nargs);		
 	kprintf("%s\t\t%s\t\t%s\n",a[0],a[1],a[2]);
-	if (nargs != 3) return 0;
+	if (nargs != 3) {
+		kprintf("Usage: df nr on/off");
+		return 0;			
+	}
 	// parse option 
 	int option_number = atoi(a[1]);	
 	kprintf("option number is %d\n",option_number);
-	if (option_number >= 1 && option_number <= 12) {
+	if (!(option_number >= 1 && option_number <= 12)){
+		kprintf("Usage: df nr on/off");
+		return 0;
+	}
+	else {
 		if(!strcmp(a[2], "on")){
 			dbflags = (1 << (option_number - 1));
 		}		
