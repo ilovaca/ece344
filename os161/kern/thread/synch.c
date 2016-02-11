@@ -10,6 +10,9 @@
 #include <curthread.h>
 #include <machine/spl.h>
 
+/* Forward declaration for a field in lock structure */
+extern struct thread *curthread;
+
 ////////////////////////////////////////////////////////////
 //
 // Semaphore.
@@ -130,30 +133,31 @@ lock_destroy(struct lock *lock)
 	kfree(lock);
 }
 
-void
-lock_acquire(struct lock *lock)
-{
-	// Write this
 
-	(void)lock;  // suppress warning until code gets written
+/* An alternative implementation of mutex using interrupts */
+void lock_acquire (struct lock *lock) {
+	// disable interrups
+	int original_interrupt_level = splhigh();
+	// spin until unlocked
+	while (lock->held != 0);
+	// this thread gets the lock
+	lock->held = 1;	
+	// restore original interrupt
+	splx(original_interrupt_level);
+	return;
 }
 
 void
 lock_release(struct lock *lock)
 {
-	// Write this
-
-	(void)lock;  // suppress warning until code gets written
+	lock->held = 0;
 }
+
 
 int
 lock_do_i_hold(struct lock *lock)
 {
-	// Write this
-
-	(void)lock;  // suppress warning until code gets written
-
-	return 1;    // dummy until code gets written
+	return (lock->holder == curthread);
 }
 
 ////////////////////////////////////////////////////////////
