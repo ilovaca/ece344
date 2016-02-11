@@ -118,7 +118,7 @@ lock_create(const char *name)
 	}
 	
 	// add stuff here as needed
-	
+	lock-> holder = NULL;
 	return lock;
 }
 
@@ -136,12 +136,13 @@ lock_destroy(struct lock *lock)
 
 /* An alternative implementation of mutex using interrupts */
 void lock_acquire (struct lock *lock) {
-	// disable interrups
+	// disable interrupts
 	int original_interrupt_level = splhigh();
 	// spin until unlocked
 	while (lock->held != 0);
 	// this thread gets the lock
-	lock->held = 1;	
+	lock-> held = 1;	
+	lock-> holder = curthread;
 	// restore original interrupt
 	splx(original_interrupt_level);
 	return;
@@ -150,7 +151,8 @@ void lock_acquire (struct lock *lock) {
 void
 lock_release(struct lock *lock)
 {
-	lock->held = 0;
+	lock-> held = 0;
+	lock-> holder = NULL;
 }
 
 
