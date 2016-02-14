@@ -221,7 +221,7 @@ cv_wait(struct cv *cv, struct lock *lock)
 	int spl = splhigh();
 	lock_release(lock);
 	// we only need the size of the wait_queue to properly sleep.
-	array_add(cv->wait_queue, void(0));
+	array_add(cv->wait_queue, 0);
 	// let the index/address of the wait_queue elements to be the 
 	// sleep address for the current thread
 	thread_sleep(cv->wait_queue->v + array_getnum(cv->wait_queue) - 1);
@@ -233,7 +233,7 @@ cv_wait(struct cv *cv, struct lock *lock)
 void
 cv_signal(struct cv *cv, struct lock *lock)
 {
-	(void) lock;
+	(void*) lock;
 	int spl = splhigh();
 
 	if (array_getnum(cv->wait_queue) > 0) {
@@ -247,7 +247,7 @@ cv_signal(struct cv *cv, struct lock *lock)
 void
 cv_broadcast(struct cv *cv, struct lock *lock)
 {
-	(void) lock;
+	(void*) lock;
 	int spl = splhigh();
  
 	while (array_getnum(cv->wait_queue) > 0) {
