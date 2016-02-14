@@ -191,7 +191,7 @@ cv_create(const char *name)
 	
 	// add stuff here as needed
 	cv->wait_queue = array_create();
-	if (wait_queue == NULL) {
+	if (cv->wait_queue == NULL) {
 		kfree(cv);
 		return NULL;
 	}
@@ -247,6 +247,7 @@ cv_signal(struct cv *cv, struct lock *lock)
 void
 cv_broadcast(struct cv *cv, struct lock *lock)
 {
+	(void) lock;
 	int spl = splhigh();
  
 	while (array_getnum(cv->wait_queue) > 0) {
