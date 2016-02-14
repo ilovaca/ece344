@@ -7,13 +7,13 @@
 
 
 #include <thread.h>
-
+#include <array.h>
 
 /*
  * Dijkstra-style semaphore.
  * Operations:
- *     P (proberen): decrement count. If the count is 0, block until
- *                   the count is 1 again before decrementing.
+ *     P (proberen): decrement count. If the count is 0, block
+ * 			until the count is 1 again before decrementing.
  *     V (verhogen): increment count.
  * 
  * Both operations are atomic.
@@ -97,6 +97,8 @@ struct cv {
 	char *name;
 	// add what you need here
 	// (don't forget to mark things volatile as needed)
+	struct array * wait_queue;
+
 };
 
 struct cv *cv_create(const char *name);

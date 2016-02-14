@@ -39,13 +39,13 @@ struct thread {
 	struct vnode *t_cwd;
 };
 
-/* Call once during startup to allocate data structures. */
+/* Call once during STARTUP to allocate data structures. */
 struct thread *thread_bootstrap(void);
 
 /* Call during panic to stop other threads in their tracks */
 void thread_panic(void);
 
-/* Call during shutdown to clean up (must be called by initial thread) */
+/* Call during SHUTDOWN to clean up (must be called by initial thread) */
 void thread_shutdown(void);
 
 /*

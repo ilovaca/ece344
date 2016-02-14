@@ -37,6 +37,8 @@ static int numthreads;
 /*
  * Create a thread. This is used both to create the first thread's 
  * thread structure and to create subsequent threads.
+ * Note: this does not actually run the thread, instead it intiailizes 
+ * a thread structure in kernel. What a bad name for the function!
  */
 
 static
@@ -69,6 +71,7 @@ thread_create(const char *name)
  * Destroy a thread.
  *
  * This function cannot be called in the victim thread's own context.
+ 	 -----> must be called by another thread
  * Freeing the stack you're actually using to run would be... inadvisable.
  */
 static
@@ -165,6 +168,7 @@ thread_panic(void)
 
 /*
  * Thread initialization.
+ * threading sub-system initialization during initial bootstrap stage
  */
 struct thread *
 thread_bootstrap(void)
@@ -288,7 +292,9 @@ thread_fork(const char *name,
 		goto fail;
 	}
 
-	/* Make the new thread runnable */
+	/* Make the new thread runnable 
+	* implementation is just to add it to the run queue
+	*/
 	result = make_runnable(newguy);
 	if (result != 0) {
 		goto fail;
@@ -391,7 +397,7 @@ mi_switch(threadstate_t nextstate)
 	/*
 	 * Call the scheduler (must come *after* the array_adds)
 	 */
-
+	// the call to the scheduler will return the next thread to run
 	next = scheduler();
 
 	/* update curthread */
@@ -462,7 +468,7 @@ thread_exit(void)
 	assert(numthreads>0);
 	numthreads--;
 	mi_switch(S_ZOMB);
-
+	// LOL
 	panic("Thread came back from the dead!\n");
 }
 

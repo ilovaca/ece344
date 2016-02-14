@@ -134,12 +134,16 @@ lock_destroy(struct lock *lock)
 }
 
 
-/* An alternative implementation of mutex using interrupts */
 void lock_acquire (struct lock *lock) {
 	// disable interrupts
 	int original_interrupt_level = splhigh();
 	// spin until unlocked
-	while (lock->held != 0);
+	while (lock->held != 0) {
+		// enable all interrupts
+		spl0();
+		// then disable
+		splhigh();
+	}
 	// this thread gets the lock
 	lock-> held = 1;	
 	lock-> holder = curthread;
@@ -151,8 +155,10 @@ void lock_acquire (struct lock *lock) {
 void
 lock_release(struct lock *lock)
 {
+	int spl = splhigh();
 	lock-> held = 0;
 	lock-> holder = NULL;
+	splx(spl);
 }
 
 
@@ -184,41 +190,68 @@ cv_create(const char *name)
 	}
 	
 	// add stuff here as needed
-	
+	wait_queue = array_create();
+	if (wait_queue == NULL) {
+		kfree(cv);
+		return NULL;
+	}
 	return cv;
 }
 
 void
 cv_destroy(struct cv *cv)
 {
+	int spl = splhigh();
 	assert(cv != NULL);
 
 	// add stuff here as needed
-	
+	array_destroy(cv->wait_queue);
 	kfree(cv->name);
 	kfree(cv);
+	splx(spl);
 }
 
+/* the way it work is that when some consumer threads are waiting*/
 void
 cv_wait(struct cv *cv, struct lock *lock)
 {
-	// Write this
-	(void)cv;    // suppress warning until code gets written
-	(void)lock;  // suppress warning until code gets written
+	// disable interrupts to ensure atomic 
+	// operations on wait_queue, and thread_sleep 
+	// will not be interrupted
+	int spl = splhigh();
+	lock_release(lock);
+	// we only need the size of the wait_queue to properly sleep.
+	array_add(cv->wait_queue, void(0));
+	// let the index/address of the wait_queue elements to be the 
+	// sleep address for the current thread
+	thread_sleep(cv->wait_queue->v + array_getnum(cv->wait_queue) - 1);
+	splx(spl);
+	/* This lock is for application-level shared resources */
+	lock_acquire(lock); 
 }
 
 void
 cv_signal(struct cv *cv, struct lock *lock)
 {
-	// Write this
-	(void)cv;    // suppress warning until code gets written
-	(void)lock;  // suppress warning until code gets written
+	int spl = splhigh();
+
+	if (array_getnum(cv->wait_queue) > 0) {
+		// wake up the first thread in queue
+		thread_wakeup(cv->wait_queue->v);
+		array_remove(cv->wait_queue, 0);
+	}
+	splx(spl);
 }
 
 void
 cv_broadcast(struct cv *cv, struct lock *lock)
 {
-	// Write this
-	(void)cv;    // suppress warning until code gets written
-	(void)lock;  // suppress warning until code gets written
+	int spl = splhigh();
+ 
+	while (array_getnum(cv->wait_queue) > 0) {
+		thread_wakeup(cv->wait_queue->v);
+		array_remove(cv->wait_queue, 0);
+	}
+
+	splx(spl);
 }
