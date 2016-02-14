@@ -224,7 +224,7 @@ cv_wait(struct cv *cv, struct lock *lock)
 	array_add(cv->wait_queue, 0);
 	// let the index/address of the wait_queue elements to be the 
 	// sleep address for the current thread
-	thread_sleep(cv->wait_queue->v + array_getnum(cv->wait_queue) - 1);
+	thread_sleep(cv->wait_queue.v + array_getnum(cv->wait_queue) - 1);
 	splx(spl);
 	/* This lock is for application-level shared resources */
 	lock_acquire(lock); 
@@ -238,7 +238,7 @@ cv_signal(struct cv *cv, struct lock *lock)
 
 	if (array_getnum(cv->wait_queue) > 0) {
 		// wake up the first thread in queue
-		thread_wakeup(cv->wait_queue->v);
+		thread_wakeup(cv->wait_queue.v);
 		array_remove(cv->wait_queue, 0);
 	}
 	splx(spl);
@@ -251,7 +251,7 @@ cv_broadcast(struct cv *cv, struct lock *lock)
 	int spl = splhigh();
  
 	while (array_getnum(cv->wait_queue) > 0) {
-		thread_wakeup(cv->wait_queue->v);
+		thread_wakeup(cv->wait_queue.v);
 		array_remove(cv->wait_queue, 0);
 	}
 
