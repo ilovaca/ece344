@@ -219,6 +219,8 @@ cv_wait(struct cv *cv, struct lock *lock)
 	// operations on wait_queue, and thread_sleep 
 	// will not be interrupted
 	int spl = splhigh();
+	// atomically (by disabling interrupts) release the lock to let 
+	// other threads to enter
 	lock_release(lock);
 	// we only need the size of the wait_queue to properly sleep.
 	array_add(cv->wait_queue, 0);
@@ -235,8 +237,8 @@ cv_signal(struct cv *cv, struct lock *lock)
 {
 	(void*) lock;
 	int spl = splhigh();
-
-	if (array_getnum(cv->wait_queue) > 0) {
+	// if there's no threads waiting, this signal is ignored
+	if (array_getnum(cv->wait_queue) > 0) { 
 		// wake up the first thread in queue
 		thread_wakeup((cv->wait_queue)->v);
 		array_remove(cv->wait_queue, 0);

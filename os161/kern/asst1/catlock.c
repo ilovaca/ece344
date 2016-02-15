@@ -18,7 +18,7 @@
 #include <lib.h>
 #include <test.h>
 #include <thread.h>
-
+#include <synch.h>
 
 /*
  * 
@@ -43,6 +43,33 @@
  */
 
 #define NMICE 2
+
+#define N_ITERATIONS 4
+
+/* Locks */
+struct lock * dish_lock;
+/* CVs */
+struct cv* dish_cv;
+
+int num_free_dishes = NFOODBOWLS;
+
+enum dish_statuses
+{
+    non_eating,
+    cat_eating,
+    mice_eating
+};
+
+dish_statuses[NFOODBOWLS];
+
+enum dish_available
+{
+    dish1_avail,
+    dish2_avail,
+    not_avail    
+};
+
+dish_available[NFOODBOWLS];
 
 
 /*
@@ -83,12 +110,40 @@ void
 catlock(void * unusedpointer, 
         unsigned long catnumber)
 {
-        /*
-         * Avoid unused variable warnings.
-         */
+    for (int iteration = 0; iteration < N_ITERATIONS; iteration ++) {
+            /* First grab the dish lock */
+            lock_acquire(dish_lock);
 
-        (void) unusedpointer;
-        (void) catnumber;
+
+            while (dish_statuses[0] == mouse_eating || dish_statuses[1] == mouse_eating || num_free_dishes <= 0) {
+                cv_wait(dish_cv, dish_lock);
+            }
+           
+            if (dish_available[0] == dish1_avail) {
+                dish_statuses[0] = cat_eating;
+                num_free_dishes--;
+                lock_eat("cat", catnumber, 1, iteration);
+                /* reset num_free_dishes and dish_statuses[0] */
+                num_free_dishes++;
+                dish_statuses[0] = non_eating;
+
+            } else if (dish_available[1] == dish2_avail) {
+                dish_statuses[1] = cat_eating;
+                num_free_dishes--;
+                lock_eat("cat", catnumber, 2, iteration);
+                 /* reset num_free_dishes and dish_statuses[0] */
+                num_free_dishes++;
+                dish_statuses[1] = non_eating;
+                
+            } else {
+                // none available is an error
+                assert(num_free_dishes <= 0);
+            }
+         
+            cv_broadcast(dish_cv, dish_lock); //notify other threads that the current thread is done.
+            lock_release(dish_lock);
+    }
+
 }
 	
 
@@ -113,12 +168,40 @@ void
 mouselock(void * unusedpointer,
           unsigned long mousenumber)
 {
-        /*
-         * Avoid unused variable warnings.
-         */
-        
-        (void) unusedpointer;
-        (void) mousenumber;
+    for (int iteration = 0; iteration < N_ITERATIONS; iteration ++) {
+
+        lock_acquire(dish_lock);
+
+        while (num_free_dishes <= 0 || dish_statuses[0] == cat_eating || dish_statuses[1] == cat_eating){
+               cv_wait(dish_cv, dish_lock);
+         }
+        /* here the mice gets the lock and ready to eat */
+
+        if (dish_available[0] == dish1_avail) {
+                dish_statuses[0] = mouse_eating;
+                num_free_dishes--;
+                lock_eat("mouse",mousenumber, 1, iteration);
+                /* reset num_free_dishes and dish_statuses[0] */
+                num_free_dishes++;
+                dish_statuses[0] = non_eating;
+
+            } else if (dish_available[1] == dish2_avail) {
+                dish_statuses[1] = mouse_eating;
+                num_free_dishes--;
+                lock_eat("mouse", mousenumber, 2, iteration);
+                 /* reset num_free_dishes and dish_statuses[0] */
+                num_free_dishes++;
+                dish_statuses[1] = non_eating;
+                
+            } else {
+                // none available is an error
+                assert(num_free_dishes <= 0);
+            }
+         
+            cv_broadcast(dish_cv, dish_lock); //notify other threads that the current thread is done.
+            lock_release(dish_lock);
+    }    
+
 }
 
 
@@ -150,6 +233,15 @@ catmouselock(int nargs,
         (void) nargs;
         (void) args;
    
+        /* intiailization code */
+        dish_lock = lock_create("dish_lock");
+
+        dish_cv = cv_create("dish_cv");
+
+        dish_statuses[0] = non_eating;
+        dish_statuses[1] = non_eating;
+        dish_available[0] = dish1_avail;
+        dish_available[1] = dish2_avail;
         /*
          * Start NCATS catlock() threads.
          */
@@ -162,6 +254,11 @@ catmouselock(int nargs,
                                     catlock, 
                                     NULL
                                     );
+
+                /*thread_fork(const char *name, 
+        void *data1, unsigned long data2,
+        void (*func)(void *, unsigned long),
+        struct thread **ret)*/
                 
                 /*
                  * panic() on error.

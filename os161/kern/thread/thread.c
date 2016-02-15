@@ -506,6 +506,7 @@ thread_sleep(const void *addr)
 	
 	curthread->t_sleepaddr = addr;
 	mi_switch(S_SLEEP);
+	// after the switch returns the sleeps is waken up
 	curthread->t_sleepaddr = NULL;
 }
 
