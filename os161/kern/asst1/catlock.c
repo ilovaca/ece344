@@ -57,7 +57,7 @@ enum dish_statuses
 {
     non_eating,
     cat_eating,
-    mice_eating
+    mouse_eating
 };
 
 dish_statuses[NFOODBOWLS];
@@ -110,7 +110,9 @@ void
 catlock(void * unusedpointer, 
         unsigned long catnumber)
 {
-    for (int iteration = 0; iteration < N_ITERATIONS; iteration ++) {
+    (void) unusedpointer;
+    int iteration;
+    for (iteration = 0; iteration < N_ITERATIONS; iteration ++) {
             /* First grab the dish lock */
             lock_acquire(dish_lock);
 
@@ -168,7 +170,9 @@ void
 mouselock(void * unusedpointer,
           unsigned long mousenumber)
 {
-    for (int iteration = 0; iteration < N_ITERATIONS; iteration ++) {
+    (void) unusedpointer;
+    int iteration;
+    for (iteration = 0; iteration < N_ITERATIONS; iteration ++) {
 
         lock_acquire(dish_lock);
 
