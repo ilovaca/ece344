@@ -52,6 +52,8 @@ struct lock * dish_lock;
 struct cv* dish_cv;
 
 int num_free_dishes = NFOODBOWLS;
+int num_cat_waiting = 0;
+int num_mice_eating = 0;
 
 enum dish_statuses
 {
@@ -116,11 +118,13 @@ catlock(void * unusedpointer,
             /* First grab the dish lock */
             lock_acquire(dish_lock);
 
-
-            while (dish_statuses[0] == mouse_eating || dish_statuses[1] == mouse_eating || num_free_dishes <= 0) {
+            num_cat_waiting ++;//currently this thread might wait for mice to leave. 
+            while (dish_statuses[0] == mouse_eating || dish_statuses[1] == mouse_eating || num_free_dishes <= 0 || num_mice_eating > 0) {
                 cv_wait(dish_cv, dish_lock);
             }
            
+            num_cat_waiting --; //at this stage, the cat is ready to eat. i.e. mice have left out.
+
             if (dish_available[0] == dish1_avail) {
                 dish_statuses[0] = cat_eating;
                 num_free_dishes--;
@@ -176,10 +180,11 @@ mouselock(void * unusedpointer,
 
         lock_acquire(dish_lock);
 
-        while (num_free_dishes <= 0 || dish_statuses[0] == cat_eating || dish_statuses[1] == cat_eating){
+        while (num_free_dishes <= 0 || dish_statuses[0] == cat_eating || dish_statuses[1] == cat_eating || num_cat_waiting > 0){
                cv_wait(dish_cv, dish_lock);
          }
         /* here the mice gets the lock and ready to eat */
+         num_mice_eating++;
 
         if (dish_available[0] == dish1_avail) {
                 dish_statuses[0] = mouse_eating;
@@ -201,7 +206,7 @@ mouselock(void * unusedpointer,
                 // none available is an error
                 assert(num_free_dishes <= 0);
             }
-         
+            num_mice_eating--;
             cv_broadcast(dish_cv, dish_lock); //notify other threads that the current thread is done.
             lock_release(dish_lock);
     }    
