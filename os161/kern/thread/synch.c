@@ -74,11 +74,11 @@ P(struct semaphore *sem)
 	 * For robustness, always check, even if we can actually
 	 * complete the P without blocking.
 	 */
-	assert(in_interrupt==0);
+	assert(in_interrupt==0); //meaning that the interrupt handler is doing nothing.
 
 	spl = splhigh();
-	while (sem->count==0) {
-		thread_sleep(sem);
+	while (sem->count==0) { //the lowest number of sem->count is 0 !
+		thread_sleep(sem); //put the current thread to wait queue and do the context switch.
 	}
 	assert(sem->count>0);
 	sem->count--;

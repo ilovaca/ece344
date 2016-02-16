@@ -18,6 +18,7 @@
 #include <lib.h>
 #include <test.h>
 #include <thread.h>
+#include <synch.h>
 
 
 /*
@@ -45,11 +46,15 @@
 #define NMICE 2
 
 
+#define N_ITERATIONS 4
+
 /*
  * 
  * Function Definitions
  * 
  */
+
+ struct semaphores* sem;
 
 /* who should be "cat" or "mouse" */
 static void
@@ -82,8 +87,12 @@ void
 catsem(void * unusedpointer, 
        unsigned long catnumber)
 {
-        /*
-         * Avoid unused variable warnings.
+    int iteration;
+    for(iteration = 0; iteration < N_ITERATIONS; i++)
+    {
+        
+    }
+         /* oid unused variable warnings.
          */
 
         (void) unusedpointer;
@@ -152,7 +161,8 @@ catmousesem(int nargs,
         /*
          * Start NCATS catsem() threads.
          */
-
+        sem = sem_create("sem",2);
+        
         for (index = 0; index < NCATS; index++) {
            
                 error = thread_fork("catsem Thread", 
