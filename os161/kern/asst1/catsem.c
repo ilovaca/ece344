@@ -189,7 +189,7 @@ mousesem(void * unusedpointer,
             continue;
         }
         /*  the mouse is ready to eat. i.e. cats have left . */
-        num_mice_eating++:
+        num_mice_eating++;
         V(thread_lock);
 
          P(sem);
