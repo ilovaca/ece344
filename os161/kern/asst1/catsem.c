@@ -198,17 +198,17 @@ mousesem(void * unusedpointer,
 
         if(dish_available[0] == dish1_avail)
         {
-            cat_dish_select = 1;
+            mice_dish_select = 1;
             dish_available[0] = not_avail;
             V(mutex);
-            sem_eat("cat",catnumber, 1,iteration);
+            sem_eat("cat", mousenumber, 1,iteration);
         }
         else if(dish_available[1] == dish2_avail)
         {
-            cat_dish_select = 2;
+            mice_dish_select = 2;
             dish_available[1] = not_avail;
             V(mutex);
-            sem_eat("cat",catnumber, 2,iteration);
+            sem_eat("cat", mousenumber, 2,iteration);
         }   
 
         // release lock to let the other thread that has entered the semaphore to proceed
@@ -216,11 +216,11 @@ mousesem(void * unusedpointer,
 
         /* here we reset state variables and notify other threads that the current thread is done. */
         P(mutex);
-        if(cat_dish_select == 1)
+        if(mice_dish_select == 1)
             dish_available[0] = dish1_avail;
-        else if(cat_dish_select == 2)
+        else if(mice_dish_select == 2)
             dish_available[1] = dish2_avail;
-        cat_dish_select = 0;
+        mice_dish_select = 0;
         num_mice_eating--;
         V(mutex);
         V(sem);
@@ -258,7 +258,7 @@ catmousesem(int nargs,
         (void) args;
    
         sem = sem_create("sem", 2);
-        metex = sem_create("lock", 1);
+        mutex = sem_create("lock", 1);
         thread_lock = sem_create("thread_lock", 1);
         dish_available[0] = dish1_avail;
         dish_available[1] = dish2_avail;
