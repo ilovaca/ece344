@@ -64,7 +64,7 @@ typedef enum
     mouse_eating
 }dish_status;
 
-dish_status dish_statuses [NFOODBOWLS];
+static dish_status dish_statuses [NFOODBOWLS];
 
 typedef enum 
 {
@@ -73,7 +73,7 @@ typedef enum
     not_avail    
 }dish_availability;
 
-dish_availability dish_available[NFOODBOWLS];
+static dish_availability dish_available[NFOODBOWLS];
 
 
 /*

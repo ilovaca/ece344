@@ -54,13 +54,13 @@
  * 
  */
 
-struct semaphore* sem;
-struct semaphore* mutex;
-struct semaphore* thread_lock;
-int num_mice_eating = 0;
-int num_cat_eating = 0;
-int cat_dish_select = 0;
-int mice_dish_select = 0;
+static struct semaphore* sem;
+static struct semaphore* mutex;
+static struct semaphore* thread_lock;
+static int num_mice_eating = 0;
+static int num_cat_eating = 0;
+static int cat_dish_select = 0;
+static int mice_dish_select = 0;
 
 
 typedef enum 
@@ -70,7 +70,7 @@ typedef enum
     not_avail    
 }dish_availability;
 
-dish_availability dish_available[NFOODBOWLS];
+static dish_availability dish_available[NFOODBOWLS];
 
 /* who should be "cat" or "mouse" */
 static void
