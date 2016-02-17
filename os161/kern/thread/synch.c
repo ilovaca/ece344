@@ -211,7 +211,9 @@ cv_destroy(struct cv *cv)
 	splx(spl);
 }
 
-/* the way it work is that when some consumer threads are waiting*/
+/* This function causes the current thread to sleep, until 
+	it is waken up by a signal 
+	Note --> precondition: */
 void
 cv_wait(struct cv *cv, struct lock *lock)
 {
@@ -219,14 +221,16 @@ cv_wait(struct cv *cv, struct lock *lock)
 	// operations on wait_queue, and thread_sleep 
 	// will not be interrupted
 	int spl = splhigh();
-	// atomically (by disabling interrupts) release the lock to let 
-	// other threads to enter
+	// atomically (by disabling interrupts) release the lock to,
+	// at a later time, let other threads to enter
 	lock_release(lock);
 	// we only need the size of the wait_queue to properly sleep.
 	array_add(cv->wait_queue, 0);
-	// let the index/address of the wait_queue elements to be the 
+	// Trick: let the index/address of the wait_queue elements to be the 
 	// sleep address for the current thread
 	thread_sleep((cv->wait_queue)->v + array_getnum(cv->wait_queue) - 1);
+	/* Once the above sleep returns, this thread is waken up by a signal, so
+		we need to let it grab the lock*/
 	splx(spl);
 	/* This lock is for application-level shared resources */
 	lock_acquire(lock); 
