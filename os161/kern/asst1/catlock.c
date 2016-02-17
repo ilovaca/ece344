@@ -57,21 +57,21 @@ int num_mice_eating = 0;
 int cat_dish_select = 0;
 int mice_dish_select = 0;
 
-enum dish_status
+typedef enum 
 {
     non_eating,
     cat_eating,
     mouse_eating
-};
+}dish_status;
 
 dish_status dish_statuses [NFOODBOWLS];
 
-enum dish_availability
+typedef enum 
 {
     dish1_avail,
     dish2_avail,
     not_avail    
-};
+}dish_availability;
 
 dish_availability dish_available[NFOODBOWLS];
 
@@ -199,7 +199,7 @@ mouselock(void * unusedpointer,
                 mice_dish_select = 1;
                 dish_statuses[0] = mouse_eating;
                 num_free_dishes--;
-                lock_release(lock);
+                lock_release(dish_lock);
                 lock_eat("mouse",mousenumber, 1, iteration);
                 /* reset num_free_dishes and dish_statuses[0] */    
             
@@ -207,7 +207,7 @@ mouselock(void * unusedpointer,
                 mice_dish_select = 2;
                 dish_statuses[1] = mouse_eating;
                 num_free_dishes--;
-                lock_release(lock);
+                lock_release(dish_lock);
                 lock_eat("mouse", mousenumber, 2, iteration);
                  /* reset num_free_dishes and dish_statuses[0] */
                 
@@ -217,7 +217,7 @@ mouselock(void * unusedpointer,
             }
          //   clocksleep(1);
             /* Here we rerset state variables and notify other threads that the current thread is done. */
-            lock_acquire(lock);
+            lock_acquire(dish_lock);
             num_free_dishes++;
             num_mice_eating--;
             if(mice_dish_select == 1)

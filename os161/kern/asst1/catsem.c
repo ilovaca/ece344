@@ -63,14 +63,14 @@ int cat_dish_select = 0;
 int mice_dish_select = 0;
 
 
-enum dish_available
+typedef enum 
 {
     dish1_avail,
     dish2_avail,
     not_avail    
-};
+}dish_availability;
 
-dish_available[NFOODBOWLS];
+dish_availability dish_available[NFOODBOWLS];
 
 /* who should be "cat" or "mouse" */
 static void
