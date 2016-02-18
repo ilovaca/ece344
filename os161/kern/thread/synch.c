@@ -155,12 +155,12 @@ void lock_acquire_ (struct lock *lock) {
 
 void lock_acquire(struct lock* lock) {
 	int spl = splhigh();
-	if (lock->held != 0) {
+	while (lock->held != 0) {
 		thread_sleep(lock);
-	} else {
-		lock->held = 1;
-		lock->holder = curthread;
 	}
+	lock->held = 1;
+	lock->holder = curthread;
+	
 	splx(spl);
 }
 
