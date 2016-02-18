@@ -54,8 +54,9 @@ struct cv* dish_cv;
 int num_free_dishes = NFOODBOWLS;
 // int num_cat_waiting = 0;
 int num_mice_eating = 0;
-int cat_dish_select = 0;
-int mice_dish_select = 0;
+int num_cat_eating = 0;
+// int cat_dish_select = 0;
+// int mice_dish_select = 0;
 
 typedef enum 
 {
@@ -116,27 +117,32 @@ catlock(void * unusedpointer,
 {
     (void) unusedpointer;
     int iteration;
+    int cat_dish_select = 0;
     for (iteration = 0; iteration < N_ITERATIONS; iteration ++) {
             /* First grab the dish lock */
             lock_acquire(dish_lock);
 
              
             // wait until the all mice have left the dish and 
-            while (dish_statuses[0] == mouse_eating || dish_statuses[1] == mouse_eating || num_free_dishes <= 0 || num_mice_eating > 0) {
+            while (num_free_dishes <= 0 || num_mice_eating > 0) {
                 cv_wait(dish_cv, dish_lock);
             }
+
+            num_cat_eating++;
            
             // find the first available dish
             if (dish_available[0] == dish1_avail) {
                 cat_dish_select = 1;
-                dish_statuses[0] = cat_eating;
+                // dish_statuses[0] = cat_eating;
+                dish_available[0] = not_avail;
                 num_free_dishes--;
                 lock_release(dish_lock);
                 lock_eat("cat", catnumber, 1, iteration);
                 
             } else if (dish_available[1] == dish2_avail) {
                 cat_dish_select = 2;
-                dish_statuses[1] = cat_eating;
+                dish_available[1] = not_avail;
+                // dish_statuses[1] = cat_eating;
                 num_free_dishes--;
                 lock_release(dish_lock);
                 lock_eat("cat", catnumber, 2, iteration);
@@ -146,15 +152,15 @@ catlock(void * unusedpointer,
                 assert(num_free_dishes <= 0);
             }
 
-          //  clocksleep(1); //give up CPU to let other thread process.
 
             /* Here we rerset state variables and notify other threads that this cat is done. */
             lock_acquire(dish_lock);
             num_free_dishes++;
+            num_cat_eating--;
             if(cat_dish_select == 1)
-                dish_statuses[0] = non_eating;
+                dish_available[0] = dish1_avail;
             else if(cat_dish_select == 2)
-                dish_statuses[1] = non_eating;
+                dish_available[1] = dish2_avail;
             cat_dish_select = 0;
             cv_broadcast(dish_cv, dish_lock); 
             lock_release(dish_lock);
@@ -185,19 +191,21 @@ mouselock(void * unusedpointer,
 {
     (void) unusedpointer;
     int iteration;
+    int mice_dish_select = 0;
     for (iteration = 0; iteration < N_ITERATIONS; iteration ++) {
 
         lock_acquire(dish_lock);
         // why do you have to wait until no cats are waiting?
-        while (num_free_dishes <= 0 || dish_statuses[0] == cat_eating || dish_statuses[1] == cat_eating){
-               cv_wait(dish_cv, dish_lock);
-         }
+        while (num_free_dishes <= 0 || num_cat_eating > 0){
+            cv_wait(dish_cv, dish_lock);
+        }
         /* here the mice gets the lock and ready to eat */
-         num_mice_eating++;
+        num_mice_eating++;
 
         if (dish_available[0] == dish1_avail) {
                 mice_dish_select = 1;
-                dish_statuses[0] = mouse_eating;
+                dish_available[0] = not_avail;
+                // dish_statuses[0] = mouse_eating;
                 num_free_dishes--;
                 lock_release(dish_lock);
                 lock_eat("mouse",mousenumber, 1, iteration);
@@ -205,7 +213,8 @@ mouselock(void * unusedpointer,
             
             } else if (dish_available[1] == dish2_avail) {
                 mice_dish_select = 2;
-                dish_statuses[1] = mouse_eating;
+                dish_available[1] = not_avail;
+                // dish_statuses[1] = mouse_eating;
                 num_free_dishes--;
                 lock_release(dish_lock);
                 lock_eat("mouse", mousenumber, 2, iteration);
@@ -215,15 +224,14 @@ mouselock(void * unusedpointer,
                 // none available is an error
                 assert(num_free_dishes <= 0);
             }
-         //   clocksleep(1);
             /* Here we rerset state variables and notify other threads that the current thread is done. */
             lock_acquire(dish_lock);
             num_free_dishes++;
             num_mice_eating--;
             if(mice_dish_select == 1)
-                dish_statuses[0] = non_eating;
+               dish_available[0] = dish1_avail;
              else if(mice_dish_select == 2)
-                dish_statuses[1] = non_eating;
+                dish_available[1] = dish2_avail;
             mice_dish_select = 0;
             cv_broadcast(dish_cv, dish_lock); //notify other threads that the current thread is done.
             lock_release(dish_lock);
@@ -265,8 +273,8 @@ catmouselock(int nargs,
 
         dish_cv = cv_create("dish_cv");
 
-        dish_statuses[0] = non_eating;
-        dish_statuses[1] = non_eating;
+        // dish_statuses[0] = non_eating;
+        // dish_statuses[1] = non_eating;
         dish_available[0] = dish1_avail;
         dish_available[1] = dish2_avail;
         /*

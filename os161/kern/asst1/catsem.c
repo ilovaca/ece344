@@ -55,12 +55,10 @@
  */
 
 static struct semaphore* sem;
-static struct semaphore* mutex;
+// static struct semaphore* mouse_sem;
 static struct semaphore* thread_lock;
 static int num_mice_eating = 0;
 static int num_cat_eating = 0;
-static int cat_dish_select = 0;
-static int mice_dish_select = 0;
 
 
 typedef enum 
@@ -104,55 +102,60 @@ catsem(void * unusedpointer,
        unsigned long catnumber)
 {
     (void)unusedpointer;
-
+    int cat_dish_select = 0;
     int iteration;
     for(iteration = 0; iteration < N_ITERATIONS; iteration++)
     {   
         // ensure atomic checking and modifying state variables
 
         if(num_mice_eating <= 0)
-            P(thread_lock);
+            // when there is no mouse eating, we let this cat in
+            // but the semaphore only allows a total of 2 cats
+            // P(thread_lock);
+            P(sem);
         else{
+            // there is indeed mouse eating, we let any cat wait
             iteration--;
             continue;
         }
-        /*  the cat is ready to eat. i.e. mice have left . */
-        kprintf("before acquire, sem->count = %d, and the cat thread is %d \n", sem->count,catnumber);
+        // kprintf("before acquire, sem->count = %d, and the cat thread is %d \n", sem->count,catnumber);
+
+        // From now on, there could be 2 cats. So we need to lock
+        P(thread_lock);
         num_cat_eating++;
-        V(thread_lock);
+        // V(thread_lock);
         // we allow two threads to enter
-        P(sem);
-        kprintf("after require, sem->count = %d, and the cat thread is %d \n", sem->count,catnumber);
+        // P(sem);
+        // kprintf("after require, sem->count = %d, and the cat thread is %d \n", sem->count,catnumber);
         // lock for globals
-        P(mutex);
+        // P(mutex);
+
         // find an available dish
         if(dish_available[0] == dish1_avail)
         {
             cat_dish_select = 1;
             dish_available[0] = not_avail;
-            V(mutex);
-            kprintf("before eat, sem->count = %d, and the cat thread is %d \n", sem->count,catnumber);
+            // Done modifying the state, we can let the other cat proceed
+            V(thread_lock);
             sem_eat("cat", catnumber, 1, iteration);
         }
         else if(dish_available[1] == dish2_avail)
         {
             cat_dish_select = 2;
             dish_available[1] = not_avail;
-            V(mutex);
+            V(thread_lock);
             sem_eat("cat", catnumber, 2, iteration);
         }   
-        // release lock to let the other thread that has entered the semaphore to proceed
-        clocksleep(1);
 
-        /* here we reset state variables and notify other threads that the current thread is done. */
-        P(mutex);
+        // done eating, we change state accordingly
+        P(thread_lock);
         if(cat_dish_select == 1)
             dish_available[0] = dish1_avail;
         else if(cat_dish_select == 2)
             dish_available[1] = dish2_avail;
         cat_dish_select = 0;
         num_cat_eating--;
-        V(mutex);
+        V(thread_lock);
         V(sem);
     }
         
@@ -181,51 +184,46 @@ mousesem(void * unusedpointer,
          unsigned long mousenumber)
 {
     (void) unusedpointer;
-     int iteration;
+    int iteration;
+    int mice_dish_select = 0;
     for(iteration = 0; iteration < N_ITERATIONS; iteration++)
     {
 
-       if(num_cat_eating <= 0)
-            P(thread_lock);
+        if(num_cat_eating <= 0)
+            P(sem);
         else{
             iteration--;
             continue;
         }
         /*  the mouse is ready to eat. i.e. cats have left . */
-        num_mice_eating++;
-        V(thread_lock);
+        // V(thread_lock);
 
-         P(sem);
-        // lock for globals
-        P(mutex);
+        P(thread_lock);
+        num_mice_eating++;
 
         if(dish_available[0] == dish1_avail)
         {
             mice_dish_select = 1;
             dish_available[0] = not_avail;
-            V(mutex);
-            sem_eat("cat", mousenumber, 1,iteration);
+            V(thread_lock);
+            sem_eat("cat", mousenumber, 1, iteration);
         }
         else if(dish_available[1] == dish2_avail)
         {
             mice_dish_select = 2;
             dish_available[1] = not_avail;
-            V(mutex);
-            sem_eat("cat", mousenumber, 2,iteration);
+            V(thread_lock);
+            sem_eat("cat", mousenumber, 2, iteration);
         }   
 
-        // release lock to let the other thread that has entered the semaphore to proceed
-        clocksleep(1);
-
-        /* here we reset state variables and notify other threads that the current thread is done. */
-        P(mutex);
+        P(thread_lock);
         if(mice_dish_select == 1)
             dish_available[0] = dish1_avail;
         else if(mice_dish_select == 2)
             dish_available[1] = dish2_avail;
         mice_dish_select = 0;
         num_mice_eating--;
-        V(mutex);
+        V(thread_lock);
         V(sem);
     }
         
@@ -261,7 +259,6 @@ catmousesem(int nargs,
         (void) args;
    
         sem = sem_create("sem", 2);
-        mutex = sem_create("lock", 1);
         thread_lock = sem_create("thread_lock", 1);
         dish_available[0] = dish1_avail;
         dish_available[1] = dish2_avail;
@@ -315,7 +312,7 @@ catmousesem(int nargs,
                 }
         }
         sem_destroy(sem);
-        sem_destroy(mutex);
+        sem_destroy(thread_lock);
         return 0;
 }
 
