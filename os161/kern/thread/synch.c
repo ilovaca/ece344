@@ -134,7 +134,7 @@ lock_destroy(struct lock *lock)
 }
 
 
-void lock_acquire (struct lock *lock) {
+void lock_acquire_ (struct lock *lock) {
 	// disable interrupts
 	int original_interrupt_level = splhigh();
 	// spin until unlocked
@@ -149,11 +149,23 @@ void lock_acquire (struct lock *lock) {
 	lock-> holder = curthread;
 	// restore original interrupt
 	splx(original_interrupt_level);
-	return;
+
+}
+
+void lock_acquire(struct lock* lock) {
+	splhigh();
+	lock->held = 1;
+	lock->holder = curthread;
+}
+
+void lock_release(struct lock* lock) {
+	lock->held = 0;
+	lock->holder = NULL;
+	spl0();
 }
 
 void
-lock_release(struct lock *lock)
+lock_release_(struct lock *lock)
 {
 	int spl = splhigh();
 	lock-> held = 0;
