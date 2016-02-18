@@ -5,13 +5,13 @@
 #include <kern/errno.h>
 #include <lib.h>
 #include <array.h>
-/*
+
 struct array {
 	int num;
 	int max;
-	void **v;//array of pointers
+	void **v;
 };
-*/
+
 struct array *
 array_create(void)
 {

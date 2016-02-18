@@ -105,7 +105,6 @@ struct lock *
 lock_create(const char *name)
 {
 	struct lock *lock;
-
 	lock = kmalloc(sizeof(struct lock));
 	if (lock == NULL) {
 		return NULL;
@@ -116,7 +115,7 @@ lock_create(const char *name)
 		kfree(lock);
 		return NULL;
 	}
-	
+	lock-> held = 0;
 	// add stuff here as needed
 	lock-> holder = NULL;
 	return lock;
@@ -126,11 +125,12 @@ void
 lock_destroy(struct lock *lock)
 {
 	assert(lock != NULL);
-
+	int spl = splhigh();
 	// add stuff here as needed
 	
 	kfree(lock->name);
 	kfree(lock);
+	splx(spl);
 }
 
 
@@ -158,6 +158,7 @@ void lock_acquire(struct lock* lock) {
 	while (lock->held != 0) {
 		thread_sleep(lock);
 	}
+	
 	lock->held = 1;
 	lock->holder = curthread;
 	
@@ -165,11 +166,10 @@ void lock_acquire(struct lock* lock) {
 }
 
 /* Declaration of the single thread wakeup function */
-void thread_wakeup_single (const void *);
 
-void lock_release (struct lock* lock) {
+void lock_release(struct lock* lock) {
 	int spl = splhigh();
-	thread_wakeup_single(lock);
+	thread_wakeup(lock);
 	lock->held = 0;
 	lock->holder = NULL;
 	splx(spl);
@@ -213,11 +213,7 @@ cv_create(const char *name)
 	}
 	
 	// add stuff here as needed
-	cv->wait_queue = array_create();
-	if (cv->wait_queue == NULL) {
-		kfree(cv);
-		return NULL;
-	}
+	
 	return cv;
 }
 
@@ -228,7 +224,6 @@ cv_destroy(struct cv *cv)
 	assert(cv != NULL);
 
 	// add stuff here as needed
-	array_destroy(cv->wait_queue);
 	kfree(cv->name);
 	kfree(cv);
 	splx(spl);
@@ -248,10 +243,10 @@ cv_wait(struct cv *cv, struct lock *lock)
 	// at a later time, let other threads to enter
 	lock_release(lock);
 	// we only need the size of the wait_queue to properly sleep.
-	array_add(cv->wait_queue, 0);
+	// array_add(cv->wait_queue, 0);
 	// Trick: let the index/address of the wait_queue elements to be the 
 	// sleep address for the current thread
-	thread_sleep((cv->wait_queue)->v + array_getnum(cv->wait_queue) - 1);
+	thread_sleep(cv);
 	/* Once the above sleep returns, this thread is waken up by a signal, so
 		we need to let it grab the lock*/
 	splx(spl);
@@ -265,10 +260,10 @@ cv_signal(struct cv *cv, struct lock *lock)
 	(void*) lock;
 	int spl = splhigh();
 	// if there's no threads waiting, this signal is ignored
-	if (array_getnum(cv->wait_queue) > 0) { 
+	if (thread_hassleepers(cv)) { 
 		// wake up the first thread in queue
-		thread_wakeup((cv->wait_queue)->v);
-		array_remove(cv->wait_queue, 0);
+		thread_wakeup_single(cv);
+		// array_remove(cv->wait_queue, 0);
 	}
 	splx(spl);
 }
@@ -279,10 +274,6 @@ cv_broadcast(struct cv *cv, struct lock *lock)
 	(void*) lock;
 	int spl = splhigh();
  
-	while (array_getnum(cv->wait_queue) > 0) {
-		thread_wakeup((cv->wait_queue)->v);
-		array_remove(cv->wait_queue, 0);
-	}
-
+	thread_wakeup(cv);
 	splx(spl);
 }

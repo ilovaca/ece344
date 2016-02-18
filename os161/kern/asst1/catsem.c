@@ -117,10 +117,12 @@ catsem(void * unusedpointer,
             continue;
         }
         /*  the cat is ready to eat. i.e. mice have left . */
+        kprintf("before acquire, sem->count = %d, and the cat thread is %d \n", sem->count,catnumber);
         num_cat_eating++;
         V(thread_lock);
         // we allow two threads to enter
         P(sem);
+        kprintf("after require, sem->count = %d, and the cat thread is %d \n", sem->count,catnumber);
         // lock for globals
         P(mutex);
         // find an available dish
@@ -129,6 +131,7 @@ catsem(void * unusedpointer,
             cat_dish_select = 1;
             dish_available[0] = not_avail;
             V(mutex);
+            kprintf("before eat, sem->count = %d, and the cat thread is %d \n", sem->count,catnumber);
             sem_eat("cat", catnumber, 1, iteration);
         }
         else if(dish_available[1] == dish2_avail)
