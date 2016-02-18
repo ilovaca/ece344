@@ -134,43 +134,53 @@ lock_destroy(struct lock *lock)
 }
 
 
-void lock_acquire (struct lock *lock) {
+void lock_acquire_ (struct lock *lock) {
 	// disable interrupts
-	//int original_interrupt_level = splhigh();
+	int spl = splhigh();
 	// spin until unlocked
-	while (lock->held != 0);/* {
+	while (lock->held != 0); {
 		// enable all interrupts
 		spl0();
 		// then disable
 		splhigh();
-	}*/
-	int original_interrupt_level = splhigh();
+	}
 	// this thread gets the lock
 	lock-> held = 1;	
 	lock-> holder = curthread;
 	// restore original interrupt
-	splx(original_interrupt_level);
+	splx(spl);
 
 }
 
-void lock_acquire_(struct lock* lock) {
-	splhigh();
-	lock->held = 1;
-	lock->holder = curthread;
+
+void lock_acquire(struct lock* lock) {
+	int spl = splhigh();
+	if (lock->held != 0) {
+		thread_sleep(lock);
+	} else {
+		lock->held = 1;
+		lock->holder = curthread;
+	}
+	splx(spl);
 }
 
-void lock_release_(struct lock* lock) {
+/* Declaration of the single thread wakeup function */
+void thread_wakeup_single (const void *);
+
+void lock_release (struct lock* lock) {
+	int spl = splhigh();
+	thread_wakeup_single(lock);
 	lock->held = 0;
 	lock->holder = NULL;
-	spl0();
+	splx(spl);
 }
 
 void
-lock_release(struct lock *lock)
+lock_release_(struct lock *lock)
 {
 	int spl = splhigh();
-	lock-> held = 0;
-	lock-> holder = NULL;
+	lock->held = 0;
+	lock->holder = NULL;
 	splx(spl);
 }
 

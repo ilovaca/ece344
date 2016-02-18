@@ -523,8 +523,11 @@ thread_wakeup(const void *addr)
 	assert(curspl>0);
 	
 	// This is inefficient. Feel free to improve it.
-	
-	for (i=0; i<array_getnum(sleepers); i++) {
+	// improvement 1: loop invariant array_getnum(sleepers)
+	int num_sleepers = array_getnum(sleepers);
+
+	for (i=0; i < num_sleepers; i++) {
+
 		struct thread *t = array_getguy(sleepers, i);
 		if (t->t_sleepaddr == addr) {
 			
@@ -540,6 +543,37 @@ thread_wakeup(const void *addr)
 			 */
 			result = make_runnable(t);
 			assert(result==0);
+		}
+	}
+}
+
+void
+thread_wakeup_single (const void *addr)
+{
+	int i, result;
+	
+	// meant to be called with interrupts off
+	assert(curspl>0);
+	
+	// This is inefficient. Feel free to improve it.
+	// improvement 1: loop invariant array_getnum(sleepers)
+	int num_sleepers = array_getnum(sleepers);
+
+	for (i=0; i < num_sleepers; i++) {
+
+		struct thread *t = array_getguy(sleepers, i);
+		if (t->t_sleepaddr == addr) {
+			
+			// Remove from list
+			array_remove(sleepers, i);
+			
+			/*
+			 * Because we preallocate during thread_fork,
+			 * this should never fail.
+			 */
+			result = make_runnable(t);
+			assert(result==0);
+			return;
 		}
 	}
 }
