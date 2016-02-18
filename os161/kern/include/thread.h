@@ -90,6 +90,9 @@ void thread_sleep(const void *addr);
  */
 void thread_wakeup(const void *addr);
 
+void thread_wakeup_single (const void * addr);
+
+
 /*
  * Return nonzero if there are any threads sleeping on the specified
  * address. Meant only for diagnostic purposes.

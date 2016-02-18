@@ -524,9 +524,9 @@ thread_wakeup(const void *addr)
 	
 	// This is inefficient. Feel free to improve it.
 	// improvement 1: loop invariant array_getnum(sleepers)
-	int num_sleepers = array_getnum(sleepers);
+	// int num_sleepers = array_getnum(sleepers);
 
-	for (i=0; i < num_sleepers; i++) {
+	for (i=0; i < array_getnum(sleepers); i++) {
 
 		struct thread *t = array_getguy(sleepers, i);
 		if (t->t_sleepaddr == addr) {
@@ -557,9 +557,9 @@ thread_wakeup_single (const void *addr)
 	
 	// This is inefficient. Feel free to improve it.
 	// improvement 1: loop invariant array_getnum(sleepers)
-	int num_sleepers = array_getnum(sleepers);
+	// int num_sleepers = array_getnum(sleepers);
 
-	for (i=0; i < num_sleepers; i++) {
+	for (i=0; i < array_getnum(sleepers); i++) {
 
 		struct thread *t = array_getguy(sleepers, i);
 		if (t->t_sleepaddr == addr) {

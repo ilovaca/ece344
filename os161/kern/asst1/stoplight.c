@@ -386,10 +386,12 @@ createcars(int nargs,
         NE_lock = lock_create("NE_lock");
         SW_lock = lock_create("SW_lock");
         SE_lock = lock_create("SE_lock");
+        kprintf("before sem_create !\n");
         from_north = sem_create("sem_north", 1);
         from_south = sem_create("sem_south", 1);
         from_east = sem_create("sem_east", 1);
         from_west = sem_create("sem_west", 1);
+        kprintf("we created sems\n");
 
 
         /*
