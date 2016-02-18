@@ -136,14 +136,15 @@ lock_destroy(struct lock *lock)
 
 void lock_acquire (struct lock *lock) {
 	// disable interrupts
-	int original_interrupt_level = splhigh();
+	//int original_interrupt_level = splhigh();
 	// spin until unlocked
-	while (lock->held != 0) {
+	while (lock->held != 0);/* {
 		// enable all interrupts
 		spl0();
 		// then disable
 		splhigh();
-	}
+	}*/
+	int original_interrupt_level = splhigh();
 	// this thread gets the lock
 	lock-> held = 1;	
 	lock-> holder = curthread;
