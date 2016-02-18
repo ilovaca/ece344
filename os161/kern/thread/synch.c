@@ -93,7 +93,7 @@ V(struct semaphore *sem)
 	spl = splhigh();
 	sem->count++;
 	assert(sem->count>0);
-	thread_wakeup(sem);
+	thread_wakeup(sem); //broadcast !
 	splx(spl);
 }
 

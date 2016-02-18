@@ -32,7 +32,19 @@
 
 #define NCARS 20
 
+#define TURN_LEFT 0
+#define TURN_RIGHT 1
+#define GO_STRAIGHT 2
 
+#define NORTH 0
+#define EAST 1
+#define SOUTH 2
+#define WEST 3
+
+/*Synchronization primitives */
+struct lock* NW_lock, NE_lock, SW_lock, SE_lock;
+// struct cv* NW_cv
+struct semaphore* from_north, from_south, from_east, from_west;
 /*
  *
  * Function Definitions
@@ -86,8 +98,48 @@ gostraight(unsigned long cardirection,
          * Avoid unused variable warnings.
          */
         
-        (void) cardirection;
-        (void) carnumber;
+    if (car_direction == NORTH) { //0
+        lock_acquire(NW_lock);
+        V(from_north);
+        message(REGION1, carnumber, cardirection, SOUTH);
+        lock_acquire(SW_lock);
+        //once the car requires SW_lock,we release NW_lock.
+        lock_release(NW_lock);
+        message(REGION2, carnumber, cardirection, SOUTH);
+        message(LEAVING, carnumber, cardirection, SOUTH);
+        lock_release(SW_lock);
+
+    } else if (car_direction == EAST) { //1
+        lock_acquire(NE_lock);
+        V(from_east);
+        message(REGION1, carnumber, cardirection, WEST);
+        lock_acquire(NW_lock);
+        lock_release(NE_lock);
+        message(REGION2, carnumber, cardirection, WEST);
+        message(LEAVING, carnumber, cardirection, WEST);
+        lock_release(NW_lock);
+
+    } else if (car_direction == SOUTH) { //2
+        lock_acquire(SE_lock);
+        V(from_south);
+        message(REGION1, carnumber, cardirection, NORTH);
+        lock_acquire(NE_lock);
+        lock_release(SE_lock);
+        message(REGION2, carnumber, cardirection, NORTH);
+        message(LEAVING, carnumber, cardirection, NORTH);
+        lock_release(NE_lock);
+
+    } else {
+        assert(car_direction == WEST); //3
+        lock_acquire(SW_lock);
+        V(from_west);
+        message(REGION1, carnumber, cardirection, EAST);
+        lock_acquire(SE_lock);
+        lock_release(SW_lock);
+        message(REGION2, carnumber, cardirection, EAST);
+        message(LEAVING, carnumber, cardirection, EAST);
+        lock_release(SE_lock);
+    }
 }
 
 
@@ -119,6 +171,60 @@ turnleft(unsigned long cardirection,
 
         (void) cardirection;
         (void) carnumber;
+    
+    if (car_direction == NORTH) { //0
+        lock_acquire(NW_lock);
+        V(from_north);
+        message(REGION1, carnumber, cardirection, WEST);
+        lock_acquire(SW_lock);
+        lock_release(NW_lock);
+        message(REGION2, carnumber, cardirection, WEST);
+        lock_acquire(SE_lock);
+        lock_release(SW_lock);
+        message(REGION3, carnumber, cardirection, WEST);
+        message(LEAVING, carnumber, cardirection, WEST);
+        lock_release(SE_lock);
+    } else if (car_direction == EAST) { //1
+        lock_acquire(NE_lock);
+        V(from_east);
+        message(REGION1, carnumber, cardirection, NORTH);
+        lock_acquire(NW_lock);
+        lock_release(NE_lock);
+        message(REGION2, carnumber, cardirection, NORTH);
+        lock_acquire(SW_lock);
+        lock_release(NE_lock);
+        message(REGION3, carnumber, cardirection, NORTH);
+        message(LEAVING, carnumber, cardirection, NORTH);
+
+        lock_release(SW_lock);
+    } else if (car_direction == SOUTH) { //2
+        lock_acquire(SE_lock);
+        V(from_south);
+        message(REGION1, carnumber, cardirection, EAST);
+        lock_acquire(NE_lock);
+        lock_release(SE_lock);
+        message(REGION2, carnumber, cardirection, EAST);
+        lock_acquire(NW_lock);
+        lock_release(NE_lock);
+        message(REGION3, carnumber, cardirection, EAST);
+        message(LEAVING, carnumber, cardirection, EAST);
+
+        lock_release(NW_lock);
+    } else {
+        assert(car_direction == WEST); //3
+        lock_acquire(SW_lock);
+        V(from_west);
+        message(REGION1, carnumber, cardirection, SOUTH);
+        lock_acquire(SE_lock);
+        lock_release(SW_lock);
+        message(REGION2, carnumber, cardirection, SOUTH);
+        lock_acquire(NE_lock);
+        lock_release(SE_lock);
+        message(REGION3, carnumber, cardirection, SOUTH);
+        message(LEAVING, carnumber, cardirection, SOUTH);
+        lock_release(NE_lock);
+    }
+
 }
 
 
@@ -144,12 +250,32 @@ void
 turnright(unsigned long cardirection,
           unsigned long carnumber)
 {
-        /*
-         * Avoid unused variable warnings.
-         */
-
-        (void) cardirection;
-        (void) carnumber;
+    if (car_direction == NORTH) { //0
+        lock_acquire(NW_lock);
+        V(from_north);
+        message(REGION1, carnumber, cardirection, WEST);
+        message(LEAVING, carnumber, cardirection, WEST);
+        lock_release(NW_lock);
+    } else if (car_direction == EAST) { //1
+        lock_acquire(NE_lock);
+        V(from_east);
+        message(REGION1, carnumber, cardirection, NORTH);
+        message(LEAVING, carnumber, cardirection, NORTH);
+        lock_release(NE_lock);
+    } else if (car_direction == SOUTH) { //2
+        lock_acquire(SE_lock);
+        V(from_south);
+        message(REGION1, carnumber, cardirection, EAST);
+        message(LEAVING, carnumber, cardirection, EAST);
+        lock_release(SE_lock);
+    } else {
+        assert(car_direction == WEST); //3
+        lock_acquire(SW_lock);
+        V(from_west);
+        message(REGION1, carnumber, cardirection, SOUTH);
+        message(LEAVING, carnumber, cardirection, SOUTH);
+        lock_release(SW_lock);
+    }
 }
 
 
@@ -178,14 +304,14 @@ void
 approachintersection(void * unusedpointer,
                      unsigned long carnumber)
 {
-        int cardirection;
-
+    int car_direction;
+    int turn_direction;
         /*
          * Avoid unused variable and function warnings.
          */
 
-        (void) unusedpointer;
-        (void) carnumber;
+    (void) unusedpointer;
+    (void) carnumber;
 	(void) gostraight;
 	(void) turnleft;
 	(void) turnright;
@@ -194,7 +320,38 @@ approachintersection(void * unusedpointer,
          * cardirection is set randomly.
          */
 
-        cardirection = random() % 4;
+    car_direction = random() % 4;
+    turn_direction = random() % 3;
+
+
+    // we enforce the FIFO ordering for the cars approaching
+    // the intersection from the same direction
+    if (car_direction == 0) {
+        // north
+        P(from_north);
+    } else if (car_direction == 1) {
+        P(from_east);
+    } else if (car_direction == 2) {
+        P(from_south);
+    } else {
+        assert(car_direction == 3);
+        P(from_west);
+    }
+
+    // Step 1: approaching an intersection
+    message(APPROACHING, carnumber, car_direction, turn_direction);
+
+
+    // after we approached the intersection, we enter it 
+    if (turn_direction == TURN_LEFT) {
+        turnleft(car_direction, carnumber);
+    } else if (turn_direction == TURN_RIGHT) {
+        turnright(car_direction, carnumber);
+    } else {
+        assert(turn_direction == GO_STRAIGHT);
+        gostraight(car_direction, carnumber);
+    }
+
 }
 
 
