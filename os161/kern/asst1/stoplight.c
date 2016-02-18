@@ -42,8 +42,8 @@
 #define WEST 3
 
 /*Synchronization primitives */
-struct lock* NW_lock, NE_lock, SW_lock, SE_lock;
-struct semaphore* from_north, from_south, from_east, from_west;
+struct lock* NW_lock, *NE_lock, *SW_lock, *SE_lock;
+struct semaphore* from_north, *from_south, *from_east, *from_west;
 /*
  *
  * Function Definitions
@@ -386,10 +386,10 @@ createcars(int nargs,
         NE_lock = lock_create("NE_lock");
         SW_lock = lock_create("SW_lock");
         SE_lock = lock_create("SE_lock");
-        from_north = sem_create("sem_north",1);
-        from_south = sem_create("sem_south",1);
-        from_east = sem_create("sem_east",1);
-        from_west = sem_create("sem_west",1);
+        from_north = sem_create("sem_north", 1);
+        from_south = sem_create("sem_south", 1);
+        from_east = sem_create("sem_east", 1);
+        from_west = sem_create("sem_west", 1);
 
 
         /*
@@ -415,6 +415,7 @@ createcars(int nargs,
                               strerror(error)
                               );
                 }
+
                 lock_destroy(NW_lock);
                 lock_destroy(NE_lock);
                 lock_destroy(SW_lock);
