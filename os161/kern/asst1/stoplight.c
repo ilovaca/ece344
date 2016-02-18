@@ -43,7 +43,6 @@
 
 /*Synchronization primitives */
 struct lock* NW_lock, NE_lock, SW_lock, SE_lock;
-// struct cv* NW_cv
 struct semaphore* from_north, from_south, from_east, from_west;
 /*
  *
@@ -98,7 +97,7 @@ gostraight(unsigned long cardirection,
          * Avoid unused variable warnings.
          */
         
-    if (car_direction == NORTH) { //0
+    if (cardirection == NORTH) { //0
         lock_acquire(NW_lock);
         V(from_north);
         message(REGION1, carnumber, cardirection, SOUTH);
@@ -109,7 +108,7 @@ gostraight(unsigned long cardirection,
         message(LEAVING, carnumber, cardirection, SOUTH);
         lock_release(SW_lock);
 
-    } else if (car_direction == EAST) { //1
+    } else if (cardirection == EAST) { //1
         lock_acquire(NE_lock);
         V(from_east);
         message(REGION1, carnumber, cardirection, WEST);
@@ -119,7 +118,7 @@ gostraight(unsigned long cardirection,
         message(LEAVING, carnumber, cardirection, WEST);
         lock_release(NW_lock);
 
-    } else if (car_direction == SOUTH) { //2
+    } else if (cardirection == SOUTH) { //2
         lock_acquire(SE_lock);
         V(from_south);
         message(REGION1, carnumber, cardirection, NORTH);
@@ -130,7 +129,7 @@ gostraight(unsigned long cardirection,
         lock_release(NE_lock);
 
     } else {
-        assert(car_direction == WEST); //3
+        assert(cardirection == WEST); //3
         lock_acquire(SW_lock);
         V(from_west);
         message(REGION1, carnumber, cardirection, EAST);
@@ -172,7 +171,7 @@ turnleft(unsigned long cardirection,
         (void) cardirection;
         (void) carnumber;
     
-    if (car_direction == NORTH) { //0
+    if (cardirection == NORTH) { //0
         lock_acquire(NW_lock);
         V(from_north);
         message(REGION1, carnumber, cardirection, WEST);
@@ -184,7 +183,7 @@ turnleft(unsigned long cardirection,
         message(REGION3, carnumber, cardirection, WEST);
         message(LEAVING, carnumber, cardirection, WEST);
         lock_release(SE_lock);
-    } else if (car_direction == EAST) { //1
+    } else if (cardirection == EAST) { //1
         lock_acquire(NE_lock);
         V(from_east);
         message(REGION1, carnumber, cardirection, NORTH);
@@ -197,7 +196,7 @@ turnleft(unsigned long cardirection,
         message(LEAVING, carnumber, cardirection, NORTH);
 
         lock_release(SW_lock);
-    } else if (car_direction == SOUTH) { //2
+    } else if (cardirection == SOUTH) { //2
         lock_acquire(SE_lock);
         V(from_south);
         message(REGION1, carnumber, cardirection, EAST);
@@ -211,7 +210,7 @@ turnleft(unsigned long cardirection,
 
         lock_release(NW_lock);
     } else {
-        assert(car_direction == WEST); //3
+        assert(cardirection == WEST); //3
         lock_acquire(SW_lock);
         V(from_west);
         message(REGION1, carnumber, cardirection, SOUTH);
@@ -250,26 +249,26 @@ void
 turnright(unsigned long cardirection,
           unsigned long carnumber)
 {
-    if (car_direction == NORTH) { //0
+    if (cardirection == NORTH) { //0
         lock_acquire(NW_lock);
         V(from_north);
         message(REGION1, carnumber, cardirection, WEST);
         message(LEAVING, carnumber, cardirection, WEST);
         lock_release(NW_lock);
-    } else if (car_direction == EAST) { //1
+    } else if (cardirection == EAST) { //1
         lock_acquire(NE_lock);
         V(from_east);
         message(REGION1, carnumber, cardirection, NORTH);
         message(LEAVING, carnumber, cardirection, NORTH);
         lock_release(NE_lock);
-    } else if (car_direction == SOUTH) { //2
+    } else if (cardirection == SOUTH) { //2
         lock_acquire(SE_lock);
         V(from_south);
         message(REGION1, carnumber, cardirection, EAST);
         message(LEAVING, carnumber, cardirection, EAST);
         lock_release(SE_lock);
     } else {
-        assert(car_direction == WEST); //3
+        assert(cardirection == WEST); //3
         lock_acquire(SW_lock);
         V(from_west);
         message(REGION1, carnumber, cardirection, SOUTH);
@@ -382,6 +381,16 @@ createcars(int nargs,
 
         (void) nargs;
         (void) args;
+        
+        NW_lock = lock_create("NW_lock"); 
+        NE_lock = lock_create("NE_lock");
+        SW_lock = lock_create("SW_lock");
+        SE_lock = lock_create("SE_lock");
+        from_north = sem_create("sem_north",1);
+        from_south = sem_create("sem_south",1);
+        from_east = sem_create("sem_east",1);
+        from_west = sem_create("sem_west",1);
+
 
         /*
          * Start NCARS approachintersection() threads.
@@ -406,6 +415,14 @@ createcars(int nargs,
                               strerror(error)
                               );
                 }
+                lock_destroy(NW_lock);
+                lock_destroy(NE_lock);
+                lock_destroy(SW_lock);
+                lock_destroy(SE_lock);
+                sem_destroy(from_north);
+                sem_destroy(from_south);
+                sem_destroy(from_east);
+                sem_destroy(from_west);
         }
 
         return 0;
