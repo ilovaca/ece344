@@ -346,15 +346,15 @@ approachintersection(void * unusedpointer,
 
     // we enforce the FIFO ordering for the cars approaching
     // the intersection from the same direction
-    if (car_direction == 0) {// North
+    if (car_direction == NORTH) {// North
         // north
         P(from_north);
-    } else if (car_direction == 1) { //East
+    } else if (car_direction == EAST) { //East
         P(from_east);
-    } else if (car_direction == 2) {//South
+    } else if (car_direction == SOUTH) {//South
         P(from_south);
     } else {
-        assert(car_direction == 3); //West
+        assert(car_direction == WEST); //West
         P(from_west);
     }
 
