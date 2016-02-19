@@ -80,6 +80,7 @@ P(struct semaphore *sem)
 	while (sem->count==0) { //the lowest number of sem->count is 0 !
 		thread_sleep(sem); //put the current thread to wait queue and do the context switch.
 	}
+	if(sem->count<0) kprintf("after sleep: sem->count == %d and the sem is %s \n" , sem->count,sem->name);
 	assert(sem->count>0);
 	sem->count--;
 	splx(spl);
@@ -157,11 +158,73 @@ void lock_acquire(struct lock* lock) {
 	int spl = splhigh();
 	while (lock->held != 0) {
 		thread_sleep(lock);
-	}
+	} 
 	
 	lock->held = 1;
 	lock->holder = curthread;
 	
+	splx(spl);
+}
+
+void lock_acquire_two(struct lock* lock1, struct lock* lock2) {
+	int spl = splhigh();
+	while (1) {
+		if(lock1->held == 0) {
+			//get the lock 1:
+			lock1->held = 1;
+			lock1->holder = curthread;
+			//try to get lock 2:
+			if(lock2->held == 1)
+			{
+				//first release lock1 and then spin:
+				lock1->held = 0;
+				lock1->holder = NULL;
+				thread_sleep(lock2);
+			}
+			else //the lock2 is available
+			{
+				lock2->held = 1;
+				lock2->holder = curthread;
+				break;
+			}
+		}
+		else{
+			thread_sleep(lock1);
+		}
+	}
+	splx(spl);
+}
+
+
+void lock_acquire_three(struct lock* lock1, struct lock* lock2, struct lock* lock3) {
+	int spl = splhigh();
+	while (1) { 
+		if (lock1->held == 0) {
+			// lock1 is available, delay the grab and check lock2
+
+			if (lock2->held == 0) {
+				// lock2 is available, go check lock3
+				if (lock3->held == 0) {
+					// all three locks are available, do the acquire
+					lock1->held = 1;
+					lock2->held = 1;
+					lock3->held = 1;
+					lock1->holder = curthread;
+					lock2->holder = curthread;
+					lock3->holder = curthread;
+					break;
+				} else {
+					thread_sleep(lock3);
+				}
+			} else {
+				// lock2 unavailable 
+				thread_sleep(lock2);
+			}
+		} else {
+			thread_sleep(lock1);
+		}
+	}
+
 	splx(spl);
 }
 
@@ -176,14 +239,31 @@ void lock_release(struct lock* lock) {
 }
 
 void
-lock_release_(struct lock *lock)
+lock_release_two(struct lock *lock1, struct lock* lock2)
 {
 	int spl = splhigh();
-	lock->held = 0;
-	lock->holder = NULL;
+	lock1->held = 0;
+	lock1->holder = NULL;
+	lock2->held = 0;
+	lock2->holder = NULL;
+	thread_wakeup(lock1);
+	thread_wakeup(lock2);
 	splx(spl);
 }
-
+void
+lock_release_three (struct lock* lock1, struct lock* lock2, struct lock* lock3) {
+	int spl = splhigh();
+	lock1->held = 0;
+	lock1->holder = NULL;
+	lock2->held = 0;
+	lock2->holder = NULL;
+	lock3->held = 0;
+	lock3->holder = NULL;
+	thread_wakeup(lock1);
+	thread_wakeup(lock2);
+	thread_wakeup(lock3);
+	splx(spl);
+}
 
 int
 lock_do_i_hold(struct lock *lock)

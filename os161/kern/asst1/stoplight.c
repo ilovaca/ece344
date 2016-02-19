@@ -42,11 +42,9 @@
 #define WEST 3
 
 /*Synchronization primitives */
-struct semaphore* NW_lock, *NE_lock, *SW_lock, *SE_lock;
+struct lock* NW_lock, *NE_lock, *SW_lock, *SE_lock;
 struct semaphore* from_north, *from_south, *from_east, *from_west;
 struct semaphore *join_sem;
-
-
 /*
  *
  * Function Definitions
@@ -102,52 +100,58 @@ gostraight(unsigned long cardirection,
         
     if (cardirection == NORTH) { //0
         message(APPROACHING, carnumber, cardirection, SOUTH);
-
-        P(NW_lock);
+        lock_acquire_two(NW_lock,SW_lock);
+       // lock_acquire(NW_lock);
         V(from_north);
         message(REGION1, carnumber, cardirection, SOUTH);
-        P(SW_lock);
+        //lock_acquire(SW_lock);
         //once the car requires SW_lock,we release NW_lock.
-        V(NW_lock);
+        // lock_release(NW_lock);
         message(REGION2, carnumber, cardirection, SOUTH);
         message(LEAVING, carnumber, cardirection, SOUTH);
-        V(SW_lock);
+        // lock_release(SW_lock);
+        lock_release_two(NW_lock, SW_lock);
 
     } else if (cardirection == EAST) { //1
         message(APPROACHING, carnumber, cardirection, WEST);
-        P(NE_lock);
+        // lock_acquire(NE_lock);
+        lock_acquire_two(NE_lock, NW_lock);
         V(from_east);
         message(REGION1, carnumber, cardirection, WEST);
-        P(NW_lock);
-        V(NE_lock);
+        // lock_acquire(NW_lock);
+        // lock_release(NE_lock);
         message(REGION2, carnumber, cardirection, WEST);
         message(LEAVING, carnumber, cardirection, WEST);
-        V(NW_lock);
+        // lock_release(NW_lock);
+        lock_release_two(NE_lock, NW_lock);
 
     } else if (cardirection == SOUTH) { //2
         message(APPROACHING, carnumber, cardirection, NORTH);
 
-        P(SE_lock);
+        // lock_acquire(SE_lock);
+        lock_acquire_two(SE_lock, NE_lock);
         V(from_south);
         message(REGION1, carnumber, cardirection, NORTH);
-        P(NE_lock);
-        V(SE_lock);
+        // lock_acquire(NE_lock);
+        // lock_release(SE_lock);
         message(REGION2, carnumber, cardirection, NORTH);
         message(LEAVING, carnumber, cardirection, NORTH);
-        V(NE_lock);
+        // lock_release(NE_lock);
+        lock_release_two(SE_lock, NE_lock);
 
     } else {
         message(APPROACHING, carnumber, cardirection, EAST);
 
         assert(cardirection == WEST); //3
-        P(SW_lock);
+        // lock_acquire(SW_lock);
+        lock_acquire_two(SW_lock, SE_lock);
         V(from_west);
         message(REGION1, carnumber, cardirection, EAST);
-        P(SE_lock);
-        V(SW_lock);
+        // lock_acquire(SE_lock);
+        // lock_release(SW_lock);
         message(REGION2, carnumber, cardirection, EAST);
         message(LEAVING, carnumber, cardirection, EAST);
-        V(SE_lock);
+        lock_release_two(SW_lock, SE_lock);
     }
 }
 
@@ -184,61 +188,69 @@ turnleft(unsigned long cardirection,
     if (cardirection == NORTH) { //0
         message(APPROACHING, carnumber, cardirection, EAST);
 
-        P(NW_lock);
+       // lock_acquire(NW_lock);
+        lock_acquire_three(NW_lock,SW_lock,SE_lock);
         V(from_north);
         message(REGION1, carnumber, cardirection, EAST);
-        P(SW_lock);
-        V(NW_lock);
+       // lock_acquire(SW_lock);
+       // lock_release(NW_lock);
         message(REGION2, carnumber, cardirection, EAST);
-        P(SE_lock);
-        V(SW_lock);
+        //lock_acquire(SE_lock);
+        //lock_release(SW_lock);
         message(REGION3, carnumber, cardirection, EAST);
         message(LEAVING, carnumber, cardirection, EAST);
-        V(SE_lock);
+        //lock_release(SE_lock);
+        lock_release_three(NW_lock,SW_lock,SE_lock);
     } else if (cardirection == EAST) { //1
         message(APPROACHING, carnumber, cardirection, SOUTH);
 
-        P(NE_lock);
+        // lock_acquire(NE_lock);
+        lock_acquire_three(NE_lock, NW_lock, SW_lock);
         V(from_east);
         message(REGION1, carnumber, cardirection, SOUTH);
-        P(NW_lock);
-        V(NE_lock);
+        // lock_acquire(NW_lock);
+        // lock_release(NE_lock);
         message(REGION2, carnumber, cardirection, SOUTH);
-        P(SW_lock);
-        V(NW_lock);
+        // lock_acquire(SW_lock);
+        // lock_release(NW_lock);
         message(REGION3, carnumber, cardirection, SOUTH);
         message(LEAVING, carnumber, cardirection, SOUTH);
-        V(SW_lock);
-
+        // lock_release(SW_lock);
+        lock_release_three(NE_lock, NW_lock, SW_lock);
+        
     } else if (cardirection == SOUTH) { //2
         message(APPROACHING, carnumber, cardirection, WEST);
-        P(SE_lock);
+        // lock_acquire(SE_lock);
+        lock_acquire_three(SE_lock, NE_lock, NW_lock);
         V(from_south);
         message(REGION1, carnumber, cardirection, WEST);
-        P(NE_lock);
-        V(SE_lock);
+        // lock_acquire(NE_lock);
+        // lock_release(SE_lock);
         message(REGION2, carnumber, cardirection, WEST);
-        P(NW_lock);
-        V(NE_lock);
+        // lock_acquire(NW_lock);
+        // lock_release(NE_lock);
         message(REGION3, carnumber, cardirection, WEST);
         message(LEAVING, carnumber, cardirection, WEST);
-        V(NW_lock);
+        // lock_release(NW_lock);
+        lock_release_three(SE_lock, NE_lock, NW_lock);
 
     } else {
         message(APPROACHING, carnumber, cardirection, NORTH);
 
         assert(cardirection == WEST); //3
-        P(SW_lock);
+        // lock_acquire(SW_lock);
+        lock_acquire_three(SW_lock, SE_lock, NE_lock);
         V(from_west);
         message(REGION1, carnumber, cardirection, NORTH);
-        P(SE_lock);
-        V(SW_lock);
+        // lock_acquire(SE_lock);
+        // lock_release(SW_lock);
         message(REGION2, carnumber, cardirection, NORTH);
-        P(NE_lock);
-        V(SE_lock);
+        // lock_acquire(NE_lock);
+        // lock_release(SE_lock);
         message(REGION3, carnumber, cardirection, NORTH);
         message(LEAVING, carnumber, cardirection, NORTH);
-        V(NE_lock);
+        // lock_release(NE_lock);
+        lock_release_three(SW_lock, SE_lock, NE_lock);
     }
 
 }
@@ -268,33 +280,33 @@ turnright(unsigned long cardirection,
 {
     if (cardirection == NORTH) { //0
         message(APPROACHING, carnumber, cardirection, WEST);
-        P(NW_lock);
+        lock_acquire(NW_lock);
         V(from_north);
         message(REGION1, carnumber, cardirection, WEST);
         message(LEAVING, carnumber, cardirection, WEST);
-        V(NW_lock);
+        lock_release(NW_lock);
     } else if (cardirection == EAST) { //1
         message(APPROACHING, carnumber, cardirection, NORTH);
-        P(NE_lock);
+        lock_acquire(NE_lock);
         V(from_east);
         message(REGION1, carnumber, cardirection, NORTH);
         message(LEAVING, carnumber, cardirection, NORTH);
-        V(NE_lock);
+        lock_release(NE_lock);
     } else if (cardirection == SOUTH) { //2
         message(APPROACHING, carnumber, cardirection, EAST);
-        P(SE_lock);
+        lock_acquire(SE_lock);
         V(from_south);
         message(REGION1, carnumber, cardirection, EAST);
         message(LEAVING, carnumber, cardirection, EAST);
-        V(SE_lock);
+        lock_release(SE_lock);
     } else {
         message(APPROACHING, carnumber, cardirection, SOUTH);
         assert(cardirection == WEST); //3
-        P(SW_lock);
+        lock_acquire(SW_lock);
         V(from_west);
         message(REGION1, carnumber, cardirection, SOUTH);
         message(LEAVING, carnumber, cardirection, SOUTH);
-        V(SW_lock);
+        lock_release(SW_lock);
     }
 }
 
@@ -346,15 +358,15 @@ approachintersection(void * unusedpointer,
 
     // we enforce the FIFO ordering for the cars approaching
     // the intersection from the same direction
-    if (car_direction == NORTH) {// North
+    if (car_direction == 0) {// North
         // north
         P(from_north);
-    } else if (car_direction == EAST) { //East
+    } else if (car_direction == 1) { //East
         P(from_east);
-    } else if (car_direction == SOUTH) {//South
+    } else if (car_direction == 2) {//South
         P(from_south);
     } else {
-        assert(car_direction == WEST); //West
+        assert(car_direction == 3); //West
         P(from_west);
     }
 
@@ -405,10 +417,10 @@ createcars(int nargs,
         (void) nargs;
         (void) args;
         
-        NW_lock = sem_create("NW_lock",1); 
-        NE_lock = sem_create("NE_lock",1);
-        SW_lock = sem_create("SW_lock",1);
-        SE_lock = sem_create("SE_lock",1);
+        NW_lock = lock_create("NW_lock"); 
+        NE_lock = lock_create("NE_lock");
+        SW_lock = lock_create("SW_lock");
+        SE_lock = lock_create("SE_lock");
         // kprintf("before sem_create !\n");
         from_north = sem_create("sem_north", 1);
         from_south = sem_create("sem_south", 1);
@@ -448,10 +460,10 @@ createcars(int nargs,
         for (i = 0; i < NCARS; i++) {
             P(join_sem);
         }
-                sem_destroy(NW_lock);
-                sem_destroy(NE_lock);
-                sem_destroy(SW_lock);
-                sem_destroy(SE_lock);
+                lock_destroy(NW_lock);
+                lock_destroy(NE_lock);
+                lock_destroy(SW_lock);
+                lock_destroy(SE_lock);
                 sem_destroy(from_north);
                 sem_destroy(from_south);
                 sem_destroy(from_east);

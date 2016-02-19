@@ -65,8 +65,10 @@ void         lock_acquire(struct lock *);
 void         lock_release(struct lock *);
 int          lock_do_i_hold(struct lock *);
 void         lock_destroy(struct lock *);
-
-
+void 		lock_acquire_two(struct lock*, struct lock*);
+void 		lock_release_two(struct lock*, struct lock*);
+void 		lock_acquire_three(struct lock*, struct lock*, struct lock*);
+void 		lock_release_three(struct lock*, struct lock*, struct lock*);
 /*
  * Condition variable.
  *
