@@ -57,6 +57,7 @@
 static struct semaphore* sem;
 // static struct semaphore* mouse_sem;
 static struct semaphore* thread_lock;
+static struct semaphore* join_count;
 static int num_mice_eating = 0;
 static int num_cat_eating = 0;
 
@@ -101,28 +102,25 @@ void
 catsem(void * unusedpointer, 
        unsigned long catnumber)
 {
+   // kprintf("cat %d is coming\n",catnumber);
     (void)unusedpointer;
     int cat_dish_select = 0;
     int iteration;
     for(iteration = 0; iteration < N_ITERATIONS; iteration++)
-    {   
-        // ensure atomic checking and modifying state variables
-
-        if(num_mice_eating <= 0)
-            // when there is no mouse eating, we let this cat in
-            // but the semaphore only allows a total of 2 cats
-            // P(thread_lock);
-            P(sem);
-        else{
-            // there is indeed mouse eating, we let any cat wait
+    {       
+        P(sem);
+        P(thread_lock); 
+        if(num_mice_eating>0){
+            V(thread_lock);
             iteration--;
             continue;
         }
-        // kprintf("before acquire, sem->count = %d, and the cat thread is %d \n", sem->count,catnumber);
-
+        
+           
         // From now on, there could be 2 cats. So we need to lock
-        P(thread_lock);
+        // P(thread_lock);
         num_cat_eating++;
+        // kprintf("the number of cat eating now is %d\n",num_cat_eating);
         // V(thread_lock);
         // we allow two threads to enter
         // P(sem);
@@ -158,6 +156,7 @@ catsem(void * unusedpointer,
         V(thread_lock);
         V(sem);
     }
+     V(join_count);
         
 }
         
@@ -183,22 +182,31 @@ void
 mousesem(void * unusedpointer, 
          unsigned long mousenumber)
 {
+   //  kprintf("mouse %d is coming\n",mousenumber);
     (void) unusedpointer;
     int iteration;
     int mice_dish_select = 0;
     for(iteration = 0; iteration < N_ITERATIONS; iteration++)
     {
 
-        if(num_cat_eating <= 0)
-            P(sem);
-        else{
+        // if(num_cat_eating <= 0)
+        P(sem);
+        P(thread_lock);
+        if(num_cat_eating>0){
+            V(thread_lock);
             iteration--;
             continue;
         }
+        
+       
+        // else{
+            // iteration--;
+            // continue;
+        // }
         /*  the mouse is ready to eat. i.e. cats have left . */
         // V(thread_lock);
 
-        P(thread_lock);
+        // P(thread_lock);
         num_mice_eating++;
 
         if(dish_available[0] == dish1_avail)
@@ -206,14 +214,14 @@ mousesem(void * unusedpointer,
             mice_dish_select = 1;
             dish_available[0] = not_avail;
             V(thread_lock);
-            sem_eat("cat", mousenumber, 1, iteration);
+            sem_eat("mouse", mousenumber, 1, iteration);
         }
         else if(dish_available[1] == dish2_avail)
         {
             mice_dish_select = 2;
             dish_available[1] = not_avail;
             V(thread_lock);
-            sem_eat("cat", mousenumber, 2, iteration);
+            sem_eat("mouse", mousenumber, 2, iteration);
         }   
 
         P(thread_lock);
@@ -226,6 +234,7 @@ mousesem(void * unusedpointer,
         V(thread_lock);
         V(sem);
     }
+    V(join_count);
         
 }
 
@@ -260,6 +269,7 @@ catmousesem(int nargs,
    
         sem = sem_create("sem", 2);
         thread_lock = sem_create("thread_lock", 1);
+        join_count = sem_create("join_count",0);
         dish_available[0] = dish1_avail;
         dish_available[1] = dish2_avail;
 
@@ -311,8 +321,12 @@ catmousesem(int nargs,
                               );
                 }
         }
+
+        int i;
+        for(i=0;i<8;i++) P(join_count);
         sem_destroy(sem);
         sem_destroy(thread_lock);
+        sem_destroy(join_count);
         return 0;
 }
 

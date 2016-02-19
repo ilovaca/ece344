@@ -48,6 +48,9 @@
 
 /* Locks */
 struct lock * dish_lock;
+struct lock* count_lock;
+
+    
 /* CVs */
 struct cv* dish_cv;
 
@@ -57,6 +60,7 @@ int num_mice_eating = 0;
 int num_cat_eating = 0;
 // int cat_dish_select = 0;
 // int mice_dish_select = 0;
+int join_count = 1;
 
 typedef enum 
 {
@@ -165,6 +169,9 @@ catlock(void * unusedpointer,
             cv_broadcast(dish_cv, dish_lock); 
             lock_release(dish_lock);
     }
+    lock_acquire(count_lock);
+    join_count++;
+    lock_release(count_lock);
 }
 	
 
@@ -236,7 +243,9 @@ mouselock(void * unusedpointer,
             cv_broadcast(dish_cv, dish_lock); //notify other threads that the current thread is done.
             lock_release(dish_lock);
     }    
-
+    lock_acquire(count_lock);
+    join_count++;
+    lock_release(count_lock);
 }
 
 
@@ -270,7 +279,7 @@ catmouselock(int nargs,
    
         /* intiailization code */
         dish_lock = lock_create("dish_lock");
-
+        count_lock = lock_create("count_lock");
         dish_cv = cv_create("dish_cv");
 
         // dish_statuses[0] = non_eating;
@@ -331,9 +340,12 @@ catmouselock(int nargs,
                               );
                 }
         }
+        while(join_count != 9);
         // dispose sync primitives
         lock_destroy(dish_lock);
+        lock_destroy(count_lock);
         cv_destroy(dish_cv);
+    
 
         return 0;
 }
