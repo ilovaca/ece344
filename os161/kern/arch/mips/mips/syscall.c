@@ -160,22 +160,54 @@ md_forkentry(void* tf, unsigned long vmspace)
 
 unsigned int allocate_PID(){
 	int spl = splhigh();
-	if (pid_count >= MAX_PID) {  //if pid_count >= MAX_PID, we reset the pid_count to be 1, and we check from 1. 
+	int i;
+	if (pid_count >= MAX_PID - 1) {  
+		//if the most recently used pid is outside the MAX_PID range, 
+		// we start over at the very beginning. 
 		pid_count = 1;
 	}
-		// if currently the pid falls within the 0~MAX_PID range, we find the next
-		// available 
-	for (int i = pid_count; i < MAX_PID; i++) {
+		//  we find the next available pid  
+	int done = 0;
+	for (i = pid_count; i < MAX_PID; i++) {
 		if (array_getguy(PCBs, i) == NULL){ 
 			pid_count = i;
 			splx(spl);
 			return i;
 		}
+	} 
+	for (i = pid_count; i > 1; i--) {
+		// if we didn't find an available pid in the 2nd half
+		// of the pcb array, it must be in the first half, if 
+		// there is one
+		if (array_getguy(PCBs, i) == NULL){ 
+		pid_count = i;
+		splx(spl);
+		return i;
+		}		
 	}
 
 	splx(spl);
+	// reaching this line means there's no avaiable pid
 	return EAGAIN;
 }
+
+	// int i = pid_count,record = pid_count;
+	// int done = 0;
+	// while(done == 0){
+	// 	if (array_getguy(PCBs, i) == NULL){ 
+	// 		done = 1;
+	// 		pid_count = i;
+	// 	}
+	// 	if(i < MAX_PID){
+	// 		i++;
+	// 		if(i == record)
+	// 			return 
+	// 	}
+	// 	else 
+	// 		i = 1;
+	// }
+
+
 
 int sys_fork(struct trapframe *tf, int * retval){
 	/* In parent process */
