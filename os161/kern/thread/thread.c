@@ -33,7 +33,10 @@ static struct array *zombies;
 
 /* Total number of outstanding threads. Does not count zombies[]. */
 static int numthreads;
-
+/* kernel PCB container */
+struct array * PCBs;
+/* current position in the PCBs */
+unsigned int pid_count;
 /*
  * Create a thread. This is used both to create the first thread's 
  * thread structure and to create subsequent threads.
@@ -185,7 +188,15 @@ thread_bootstrap(void)
 	if (zombies==NULL) {
 		panic("Cannot create zombies array\n");
 	}
+	/* Initialize the kernel PCB structure */
 	
+	PCBs = array_create();
+	array_preallocate(PCBs, MAX_PID);
+	for (int i = 0; i < MAX_PID; i++) {
+		array_setguy(PCBs, i, NULL);
+	}
+
+	pid_count = 1;
 	/*
 	 * Create the thread structure for the first thread
 	 * (the one that's already running)
@@ -194,6 +205,7 @@ thread_bootstrap(void)
 	if (me==NULL) {
 		panic("thread_bootstrap: Out of memory\n");
 	}
+
 
 	/*
 	 * Leave me->t_stack NULL. This means we're using the boot stack,
@@ -206,6 +218,9 @@ thread_bootstrap(void)
 	/* Set curthread */
 	curthread = me;
 
+	/* add this thread's PCB to kernel PCB structure */
+	array_setguy(PCBs, 1, &(curthread->t_pcb));
+	curthread->pID = 1;
 	/* Number of threads starts at 1 */
 	numthreads = 1;
 

@@ -98,7 +98,7 @@ load_elf(struct vnode *v, vaddr_t *entrypoint)
 	 * Read the executable header from offset 0 in the file.
 	 */
 
-	mk_kuio(&ku, &eh, sizeof(eh), 0, UIO_READ);
+	mk_kuio(&ku, &eh, sizeof(eh), 0, UIO_READ); //eh is kernel buffer.
 	result = VOP_READ(v, &ku);
 	if (result) {
 		return result;
@@ -135,7 +135,7 @@ load_elf(struct vnode *v, vaddr_t *entrypoint)
 	}
 
 	/*
-	 * Go through the list of segments and set up the address space.
+	 * Go through the list of segments and prepare the address space.
 	 *
 	 * Ordinarily there will be one code segment, one read-only
 	 * data segment, and one data/bss segment, but there might
@@ -233,7 +233,7 @@ load_elf(struct vnode *v, vaddr_t *entrypoint)
 		return result;
 	}
 
-	*entrypoint = eh.e_entry;
+	*entrypoint = eh.e_entry; 
 
 	return 0;
 }

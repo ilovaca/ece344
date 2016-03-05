@@ -8,7 +8,7 @@
 /* Get machine-dependent stuff */
 #include <machine/pcb.h>
 
-
+#define MAX_PID 1000
 struct addrspace;
 
 struct thread {
@@ -20,7 +20,7 @@ struct thread {
 	char *t_name;
 	const void *t_sleepaddr;
 	char *t_stack;
-	
+	u_int32_t pID;
 	/**********************************************************/
 	/* Public thread members - can be used by other code      */
 	/**********************************************************/
@@ -83,6 +83,10 @@ void thread_yield(void);
  * Interrupts must be disabled.
  */
 void thread_sleep(const void *addr);
+
+void thread_join(struct thread *);
+
+void thread_detach(struct thread *);
 
 /*
  * Cause all threads sleeping on the specified address to wake up.

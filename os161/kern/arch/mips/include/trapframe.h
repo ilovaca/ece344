@@ -8,10 +8,21 @@
  * This must agree with the code in exception.S.
  */
 
+ /*The trapframe contains all the information necessary to restore the user mode processor
+ registers when the kernel returns to the current process. */
+
+
+ /*
+	jr $t3 #jump to address contained in $t3
+
+	j target #unconditional jump to program label target. 
+
+ */
+
 struct trapframe {
 	u_int32_t tf_vaddr;	/* coprocessor 0 vaddr register */
 	u_int32_t tf_status;	/* coprocessor 0 status register */
-	u_int32_t tf_cause;	/* coprocessor 0 cause register */
+	u_int32_t tf_cause;	/* coprocessor 0 cause register , it contains exception type. */
 	u_int32_t tf_lo;
 	u_int32_t tf_hi;
 	u_int32_t tf_ra;	/* Saved register 31 */
@@ -45,7 +56,7 @@ struct trapframe {
 	u_int32_t tf_gp;
 	u_int32_t tf_sp;
 	u_int32_t tf_s8;
-	u_int32_t tf_epc;	/* coprocessor 0 epc register */
+	u_int32_t tf_epc;	/* coprocessor 0 epc register. epc register contains the address of instructions where the exception occurred. */
 };
 
 /*

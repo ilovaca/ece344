@@ -284,10 +284,10 @@ md_usermode(int argc, userptr_t argv, vaddr_t stack, vaddr_t entry)
 	bzero(&tf, sizeof(tf));
 
 	tf.tf_status = CST_IRQMASK | CST_IEp | CST_KUp;
-	tf.tf_epc = entry;
+	tf.tf_epc = entry; //entry point of the program about to run.
 	tf.tf_a0 = argc;
 	tf.tf_a1 = (vaddr_t)argv;
 	tf.tf_sp = stack;
 
-	mips_usermode(&tf);
+	mips_usermode(&tf); //info in tf will be restored here.
 }

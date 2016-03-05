@@ -101,8 +101,8 @@ common_exception:
     * At this point:
     *      Interrupts are off. (The processor did this for us.)
     *      k0 contains the exception cause value.
-    *      k1 contains the old stack pointer.
-    *      sp points into the kernel stack.
+    *      k1 contains the old stack pointer. ---> HW transfer SP from the user process stack to the kernel stack. 
+    *      sp points into the kernel stack !
     *      All other registers are untouched.
     */
    

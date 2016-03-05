@@ -15,12 +15,22 @@
 #include <vfs.h>
 #include <test.h>
 
-/*
- * Load program "progname" and start running it in usermode.
+/* Library call to load and run a program. This is called from the kernel menu,
+ * and this function is called in a new thread... (shouldn't it be a new process?)
+ * Load program "progname" and start running it in usermode, it doesn't return. 
  * Does not return except on error.
  *
  * Calls vfs_open on progname and thus may destroy it.
  */
+
+/* idea: 
+	* open the executable file with vnode v
+	* create & activate vmspace for the current thread
+	* load the executable
+	* define the user stack for the address space
+	* change to the user mode. 
+*/
+
 int
 runprogram(char *progname)
 {
@@ -48,7 +58,8 @@ runprogram(char *progname)
 	as_activate(curthread->t_vmspace);
 
 	/* Load the executable. */
-	result = load_elf(v, &entrypoint);
+	result = load_elf(v, &entrypoint); // Load an ELF executable user program into the current address space and
+	// returns the entry point (initial PC) for the program in ENTRYPOINT.
 	if (result) {
 		/* thread_exit destroys curthread->t_vmspace */
 		vfs_close(v);
@@ -65,9 +76,9 @@ runprogram(char *progname)
 		return result;
 	}
 
-	/* Warp to user mode. */
+	/* Warp/change to user mode. */
 	md_usermode(0 /*argc*/, NULL /*userspace addr of argv*/,
-		    stackptr, entrypoint);
+		    stackptr, entrypoint); // go to user mode after loading an executable.
 	
 	/* md_usermode does not return */
 	panic("md_usermode returned\n");

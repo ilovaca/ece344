@@ -46,9 +46,11 @@ uiomove(void *ptr, size_t n, struct uio *uio)
 		    case UIO_SYSSPACE:
 			    result = 0;
 			    if (uio->uio_rw == UIO_READ) {
+			    	// copy data from buffer to kernel space
 				    memmove(iov->iov_kbase, ptr, size);
 			    }
 			    else {
+			    	// kernel writes out data to buffer
 				    memmove(ptr, iov->iov_kbase, size);
 			    }
 			    iov->iov_kbase = ((char *)iov->iov_kbase+size);
@@ -56,7 +58,8 @@ uiomove(void *ptr, size_t n, struct uio *uio)
 		    case UIO_USERSPACE:
 		    case UIO_USERISPACE:
 			    if (uio->uio_rw == UIO_READ) {
-				    result = copyout(ptr, iov->iov_ubase,size);
+			    	//copy data from kernel space address pointed by ptr to the user space address.
+				    result = copyout(ptr, iov->iov_ubase,size); 
 			    }
 			    else {
 				    result = copyin(iov->iov_ubase, ptr, size);
