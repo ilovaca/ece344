@@ -44,6 +44,8 @@ unsigned int pid_count;
  * a thread structure in kernel. What a bad name for the function!
  */
 
+
+
 static
 struct thread *
 thread_create(const char *name)
@@ -193,7 +195,8 @@ thread_bootstrap(void)
 	
 	PCBs = array_create();
 	array_preallocate(PCBs, MAX_PID);
-	for (int i = 0; i < MAX_PID; i++) {
+	int i = 0;
+	for (; i < MAX_PID; i++) {
 		array_setguy(PCBs, i, NULL);
 	}
 

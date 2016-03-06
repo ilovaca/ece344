@@ -9,6 +9,10 @@
 #include <machine/pcb.h>
 
 #define MAX_PID 1024
+ //the following macros will be used in syscall.c and runprogram.c
+#define MAX_ARG_LEN 1024
+#define MAX_ARGC 32
+
 struct addrspace;
 
 struct thread {

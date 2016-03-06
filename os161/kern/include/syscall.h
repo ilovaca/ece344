@@ -7,18 +7,18 @@
 
 int sys_reboot(int code);
 
-int sys_execv(/* argc and argv */);
+int sys_execv(struct trapframe *);
 
-int md_forkentry(struct trapframe *tf, int32_t*);
+int sys_fork(struct trapframe *, int32_t *);
 
-int sys_waitpid();
+int sys_waitpid(struct trapframe *, int32_t *);
 
 int sys_getpid(int32_t*);
 
 int sys__exit();
 
-int sys_read();
+int sys_read(struct trapframe *, int32_t *);
 
-int sys_write();
+int sys_write(struct trapframe *, int32_t *);
 
 #endif /* _SYSCALL_H_ */

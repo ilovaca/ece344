@@ -30,9 +30,62 @@
 	* define the user stack for the address space
 	* change to the user mode. 
 */
-
+// argc and argv are in kernel, we need to copy it to the NEW addr space
 int
 runprogram(char *progname)
+{
+	struct vnode *v;
+	vaddr_t entrypoint, stackptr;
+	int result;
+
+	/* Open the file. */
+	result = vfs_open(progname, O_RDONLY, &v);
+	if (result) {
+		return result;
+	}
+
+	/* We should be a new thread. */
+	assert(curthread->t_vmspace == NULL);
+
+	/* Create a new address space. */
+	curthread->t_vmspace = as_create();
+	if (curthread->t_vmspace==NULL) {
+		vfs_close(v);
+		return ENOMEM;
+	}
+
+	/* Activate it. */
+	as_activate(curthread->t_vmspace);
+
+	/* Load the executable. */
+	result = load_elf(v, &entrypoint);
+	if (result) {
+		/* thread_exit destroys curthread->t_vmspace */
+		vfs_close(v);
+		return result;
+	}
+
+	/* Done with the file now. */
+	vfs_close(v);
+
+	/* Define the user stack in the address space */
+	result = as_define_stack(curthread->t_vmspace, &stackptr);
+	if (result) {
+		/* thread_exit destroys curthread->t_vmspace */
+		return result;
+	}
+
+	/* Warp to user mode. */
+	md_usermode(0 /*argc*/, NULL /*userspace addr of argv*/,
+		    stackptr, entrypoint);
+	
+	/* md_usermode does not return */
+	panic("md_usermode returned\n");
+	return EINVAL;
+}
+
+int 
+runprogram_execv(char *progname, int argc, char* argv[])
 {
 	struct vnode *v;
 	vaddr_t entrypoint, stackptr;
@@ -75,13 +128,17 @@ runprogram(char *progname)
 		/* thread_exit destroys curthread->t_vmspace */
 		return result;
 	}
-
+	// we copy the arguments onto the user stack
+	userptr_t user_argv = stackptr;
+	copyout(argv, user_argv, argc * MAX_ARG_LEN);
+	// adjust stack pointer to word aligned
+	stackptr -= argc * MAX_ARG_LEN;
+	stackptr -= stackptr % 4;
 	/* Warp/change to user mode. */
-	md_usermode(0 /*argc*/, NULL /*userspace addr of argv*/,
+	md_usermode(argc /*argc*/,  user_argv/*userspace addr of argv*/,
 		    stackptr, entrypoint); // go to user mode after loading an executable.
 	
 	/* md_usermode does not return */
 	panic("md_usermode returned\n");
 	return EINVAL;
 }
-

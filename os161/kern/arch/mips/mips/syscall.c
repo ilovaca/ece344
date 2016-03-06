@@ -6,10 +6,13 @@
 #include <machine/trapframe.h>
 #include <kern/callno.h>
 #include <syscall.h>
-
+#include <thread.h>
+#include <addrspace.h>
+#include <array.h>
 // Kernel process table
 extern struct array * PCBs;
 extern unsigned int pid_count;
+extern struct thread* curthread;
 /*
  * System call handler.
  *
@@ -76,13 +79,13 @@ mips_syscall(struct trapframe *tf)
 		err = sys_reboot(tf->tf_a0);
 		break;
 		case SYS_execv:
-		err = sys_execv();
+		err = sys_execv(tf);
 		break;
 		case SYS_fork:
 		err = sys_fork(tf, &retval);
 		break;
 		case SYS_waitpid:
-		err = sys_waitpid(/* waitpid(int pid)*/);
+		err = sys_waitpid(tf, &retval);
 		break;
 		case SYS_getpid:
 		err = sys_getpid(&retval);
@@ -94,7 +97,7 @@ mips_syscall(struct trapframe *tf)
 		err = sys_read(tf, &retval);
 		break;
 		case SYS_write:
-		err = sys_write();
+		err = sys_write(tf, &retval);
 		break;
 
 	    /* Add stuff here */
@@ -136,15 +139,18 @@ mips_syscall(struct trapframe *tf)
 
 /* This is the entry point of the forked child process */
 int
-md_forkentry(void* tf, unsigned long vmspace)
+md_forkentry(struct trapframe* tf, struct addrspace* vmspace)
 {
 	assert (curspl == 1);
-	(struct trapframe*) tf;
-	(struct addrspace*) vmspace;
+	// (struct trapframe*) tf;
+	// (struct addrspace*) vmspace;
 	//tf->tf_epc += 4;
 	struct addrspace * child_vmspace = NULL;
 	// copy the parent vmspace
 	int result = as_copy(vmspace, &child_vmspace);
+	if (result) {
+		return result;
+	}
 	// we are a newly created thread with no vmspace!
 	assert(curthread-> t_vmspace == NULL);
 	// assign the copied addr space to this child process
@@ -159,7 +165,7 @@ md_forkentry(void* tf, unsigned long vmspace)
 	md_usermode(tf->tf_a0, tf->tf_a1, tf->tf_sp, tf->tf_epc);
 
 	// we should never reach here
-	assert(0);
+	panic("switching to user mode returned\n");
 	return 0;
 }
 
@@ -225,12 +231,12 @@ int sys_fork(struct trapframe *tf, int * retval){
 	// assign pID to child process
 	result = allocate_PID(&(child_thread->pID));
 	if (result) {
-		free(child_tf);
+		kfree(child_tf);
 		return result;
 	}
 	// create child thread/process
 	result =  thread_fork("child_process", 
-		(void *)child_tf, (unsigned long)curthread->t_vmspace, 
+		(void*)child_tf, (unsigned long) curthread->t_vmspace, 
 		md_forkentry,
 		&child_thread);
 
@@ -276,14 +282,14 @@ int sys__exit() {
 	// put all its children to init process
 	for(;i<array_getnum(curthread->children);i++){
 
-		array_add(init->children,array_getguy(curthread->children,i));
+		array_add(init->children, array_getguy(curthread->children,i));
 	}
 
-	curthread->t_pcb->exited = 1; //indicates that the current thread has terminated.
+	curthread->t_pcb.exited = 1; //indicates that the current thread has terminated.
 	//signal the parent process
 	thread_wakeup_single(curthread);
 	splx(result);
-	//here will delete address space ! and it does not return.
+	//here will delete address space, and it does not return.
 	thread_exit(); 
 	return 0;
 }
@@ -296,7 +302,7 @@ int sys__exit() {
 			(2). if not, sleep until it is waken up
 */
 int sys_waitpid(struct trapframe* tf, int32_t* retval){
-	u_int32_t child_pID = tf->a0;
+	u_int32_t child_pID = tf->tf_a0;
 	struct thread* child = NULL;
 	int i = 0;
 	int spl = splhigh();
@@ -313,7 +319,7 @@ int sys_waitpid(struct trapframe* tf, int32_t* retval){
 	}
 
 	//if child process has terminated
-	if(child->t_pcb->exited == 1){ 
+	if(child->t_pcb.exited == 1){ 
 		array_setguy(PCBs, child_pID, NULL);
 		retval = child_pID;
 		splx(spl);
@@ -341,14 +347,15 @@ int sys_read(struct trapframe * tf, int32_t* retval)
 	} else {
 		
 		int i = 0;
-		for(;i<read_count;i++){
-			char result = (char)getch();
-			kernel_buf[i] = result;
+		for( ; i<read_count; i++){
+			kernel_buf[i] = getch();
 		}
 		/* copies LEN bytes from a kernel-space address SRC to a
  	 user-space address USERDEST.*/
-		copyout(kernel_buf, (userptr_t) user_buf, 1);
+		copyout(kernel_buf, (userptr_t) user_buf, read_count);
 	}
+	kfree(kernel_buf);
+	return 0;
 }
 
 /* from user to kernel*/
@@ -362,46 +369,45 @@ int sys_write(struct trapframe * tf, int32_t* retval) {
 		return EINVAL;
 	} else {
 		/* copies LEN bytes from a user-space address USERSRC to a
- * kernel-space address DEST.*/
-		copyin((const_userptr_t)user_buf,kernel_buf,write_count);
+ 		* kernel-space address DEST.*/
+		copyin((const_userptr_t)user_buf, kernel_buf, write_count);
 		int i = 0;
-		for(;i<write_count;i++){
-			 kprintf("%c",(char)kernel_buf[i]);
+		for(; i < write_count; i++){
+			 kprintf("%c", (char)kernel_buf[i]);
 		}
 	}
 }
 
+
+
 int sys_execv(struct trapframe* tf){
 	//clear the current thread's address space
-	assert(curthread->vmspace != NULL);
-	as_destroy(curthread->vmspace);
 
 	int char_count = 0;
-	char* kernel_argc = NULL;
-	char* kernel_argv = NULL;
-	char* iterator = tf->tf_a0;
-	while(iterator != NULL){
-		count++;
-		iterator++;
+	// kernel buf for program path
+	char* prog_path = kmalloc(sizeof(char) * MAX_ARG_LEN);
+	int result = copyinstr((const_userptr_t) tf->tf_a0, (void *)prog_path, MAX_ARG_LEN, &char_count);
+	if (result) {
+		kfree(prog_path);
+		return result;
 	}
-	count += 1;
-	kernel_argc = kmalloc(sizeof(char)*count);
-	/* Since the content of the char array (argc) is in user address space,
-	 we need to copy the array content to kernel address space. */
-	copyin((const_userptr_t)tf->tf_a0,kernel_argc,count);
 
-	count = 0; //reset count.
-	iterator = tf->tf_a1;
-	while(iterator!= NULL)
-	{
-		iterator++;
-		count++;
+	// kernel buf for program args (char **)
+	char** argv = kmalloc(sizeof(char*) * MAX_ARGC);
+	int i = 0;
+	for (; i< MAX_ARGC; i++){
+		argv[i] = kmalloc(sizeof(char) * MAX_ARG_LEN);
 	}
-	count += 1;
-	kernel_argv = kmalloc(sizeof(char)*count);
-	copyin((const_userptr_t)tf->tf_a1,kernel_argv,count);
+	int argc = 0;
+	int num_read = 0;
+	do {
+		copyinstr((const_userptr_t)tf->tf_a1, (void *)argv[argc], MAX_ARG_LEN, &num_read);
+		if (num_read != 0) argc++; //tf_a1 stores a pointer.
+	} while (num_read != 0);
 
-	//call runprogram to run the desired program
-	runprogram(kernel_argv);
+	assert(curthread->t_vmspace != NULL);
+	as_destroy(curthread->t_vmspace);
+	// prog_path and argv is in kernel
+	runprogram_execv(prog_path, argc, argv);
 
 }
