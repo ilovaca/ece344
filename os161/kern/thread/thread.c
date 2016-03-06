@@ -59,10 +59,11 @@ thread_create(const char *name)
 	}
 	thread->t_sleepaddr = NULL;
 	thread->t_stack = NULL;
-	
 	thread->t_vmspace = NULL;
 
 	thread->t_cwd = NULL;
+
+	thread->children = NULL;
 	
 	// If you add things to the thread structure, be sure to initialize
 	// them here.
@@ -79,7 +80,7 @@ thread_create(const char *name)
  */
 static
 void
-thread_destroy(struct thread *thread)
+thread_destroy(struct thread *thread) //doesn't delete the pcb of this thread !
 {
 	assert(thread != curthread);
 
@@ -93,9 +94,9 @@ thread_destroy(struct thread *thread)
 	if (thread->t_stack) {
 		kfree(thread->t_stack);
 	}
-
+	array_destroy(thread->children);	
 	kfree(thread->t_name);
-	kfree(thread);
+	kfree(thread); //here frees pcb!
 }
 
 

@@ -33,6 +33,7 @@ md_initpcb0(struct pcb *pcb)
 	pcb->pcb_ininterrupt = 0;
 
 	pcb->pcb_badfaultfunc = NULL;
+	pcb->exited = 0;
 }
 
 /*
@@ -76,7 +77,7 @@ md_initpcb(struct pcb *pcb, char *stack,
 	pcb->pcb_kstack = stacktop;
 	pcb->pcb_switchstack = (u_int32_t) sf;
 	pcb->pcb_ininterrupt = 0;
-
+	pcb->exited = 0;
 	/*
 	 * Zero out the switchframe.
 	 */

@@ -266,12 +266,12 @@ exception_return:
    lw gp, 148(sp)		/* restore gp */
    /*     152(sp)		   stack pointer - below */
    lw s8, 156(sp)		/* restore s8 */
-   lw k0, 160(sp)		/* fetch exception return PC into k0 */
+   lw k0, 160(sp)		/* fetch exception return PC (the instruction immediately after where the exception occured) into k0 */
 
    lw sp, 152(sp)		/* fetch saved sp (must be last) */
    
    /* done */
-   jr k0			/* jump back */
+   jr k0			/* jump back to user process */
    rfe				/* in delay slot */
    .end common_exception 
 

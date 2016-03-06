@@ -9,11 +9,11 @@ int sys_reboot(int code);
 
 int sys_execv(/* argc and argv */);
 
-int md_forkentry(struct trapframe *tf);
+int md_forkentry(struct trapframe *tf, int32_t*);
 
 int sys_waitpid();
 
-int sys_getpid();
+int sys_getpid(int32_t*);
 
 int sys__exit();
 

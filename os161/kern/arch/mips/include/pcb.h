@@ -42,6 +42,7 @@ struct pcb {
 
 	pcb_faultfunc pcb_badfaultfunc; // recovery for fatal kernel traps
 	jmp_buf pcb_copyjmp;            // jump area used by copyin/out etc.
+	int exited;	// indicate if this process has terminated
 };
 
 

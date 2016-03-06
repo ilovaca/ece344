@@ -8,7 +8,7 @@
 /* Get machine-dependent stuff */
 #include <machine/pcb.h>
 
-#define MAX_PID 1000
+#define MAX_PID 1024
 struct addrspace;
 
 struct thread {
@@ -31,7 +31,8 @@ struct thread {
 	 * code.
 	 */
 	struct addrspace *t_vmspace;
-
+	struct array* children; //this array stores all its child processes.
+	unsigned int parent; // this is the parent process of this thread
 	/*
 	 * This is public because it isn't part of the thread system,
 	 * and is manipulated by the virtual filesystem (VFS) code.
