@@ -45,7 +45,9 @@ kill_curthread(u_int32_t epc, unsigned code, u_int32_t vaddr)
 	/*
 	 * You will probably want to change this.
 	 */
-	panic("I don't know how to handle this\n");
+	 int bar;
+	sys__exit(-1,&bar);
+	//panic("I don't know how to handle this\n");
 }
 
 /*
@@ -291,3 +293,6 @@ md_usermode(int argc, userptr_t argv, vaddr_t stack, vaddr_t entry)
 
 	mips_usermode(&tf); //info in tf will be restored here.
 }
+
+
+	

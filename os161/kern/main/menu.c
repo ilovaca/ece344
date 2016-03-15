@@ -22,6 +22,10 @@
 
 #define MAXMENUARGS  16
 
+
+int 
+runprogram_exev(char *progname, int nargs, char* argv[]);
+
 void
 getinterval(time_t s1, u_int32_t ns1, time_t s2, u_int32_t ns2,
 	    time_t *rs, u_int32_t *rns)
@@ -60,16 +64,21 @@ cmd_progthread(void *ptr, unsigned long nargs)
 
 	assert(nargs >= 1);
 
-	if (nargs > 2) {
-		kprintf("Warning: argument passing from menu not supported\n");
-	}
+	// if (nargs > 2) {
+	// 	kprintf("Warning: argument passing from menu not supported\n");
+	// }
+
 
 	/* Hope we fit. */
 	assert(strlen(args[0]) < sizeof(progname));
 
 	strcpy(progname, args[0]);
 
-	result = runprogram(progname);
+	if(nargs > 1)
+		result = runprogram_exev(progname,args,nargs);
+	else
+		result = runprogram(progname);
+
 	if (result) {
 		kprintf("Running program %s failed: %s\n", args[0],
 			strerror(result));
@@ -101,14 +110,16 @@ common_prog(int nargs, char **args)
 	kprintf("Warning: this probably won't work with a "
 		"synchronization-problems kernel.\n");
 #endif
-
+	struct thread* temp ;
 	result = thread_fork(args[0] /* thread name */,
 			args /* thread arg */, nargs /* thread arg */,
-			cmd_progthread, NULL);
+			cmd_progthread, &temp);
 	if (result) {
 		kprintf("thread_fork failed: %s\n", strerror(result));
 		return result;
 	}
+	int ret;
+	sys_waitpid(temp->pID, 0, &ret);
 
 	return 0;
 }

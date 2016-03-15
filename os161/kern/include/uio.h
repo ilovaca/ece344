@@ -12,15 +12,10 @@ enum uio_rw {
 };
 
 enum uio_seg {
-	UIO_USERSPACE,	// the io vector points to a user process's address space
-	UIO_SYSSPACE,	// ... to kernel address space
+	UIO_USERSPACE,
+	UIO_SYSSPACE,
 	UIO_USERISPACE,
 };
-
-/* iovec describes the location and the length of the buffer that is being
-* transferred to or from. This buffer can be in the application part of the
-* kernel address space or in the kernel's part
-*/
 
 struct iovec {
 	union {
@@ -32,18 +27,13 @@ struct iovec {
 #define iov_kbase  iov_un.un_kbase
 #define iov_ubase  iov_un.un_ubase
 
-struct uio { //this structure describes the data transfer between files and a buffer in the kernel or user part of the
-	//addrspace. 
+struct uio {
 	struct iovec      uio_iovec;       /* Data block */
 	off_t             uio_offset;      /* desired offset into object */
 	size_t            uio_resid;       /* Remaining amt of data to xfer */
-	enum uio_seg      uio_segflg;      /* what kind of pointer we have --> Indicates whether
-										the buffer is in the user part of the address space or 
-										the kernel part of the addr space */
+	enum uio_seg      uio_segflg;      /* what kind of pointer we have */
 	enum uio_rw       uio_rw;          /* whether op is a read or write */
-	struct addrspace *uio_space;       /* address space for user pointer 
-										It points to the addr space object ofthe process that is doing
-										the VOP_WRITE or VOP_READ*/
+	struct addrspace *uio_space;       /* address space for user pointer */
 };
 
 

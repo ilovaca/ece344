@@ -9,10 +9,14 @@
 #include <thread.h>
 #include <addrspace.h>
 #include <array.h>
+#include "syscall.h"
 // Kernel process table
-extern struct array * PCBs;
-extern unsigned int pid_count;
+extern pcb_t * PCBs[MAX_PID];
+extern struct lock* lock;
 extern struct thread* curthread;
+
+void destroy_pcb_unit(u_int32_t pID);
+
 /*
  * System call handler.
  *
@@ -85,13 +89,13 @@ mips_syscall(struct trapframe *tf)
 		err = sys_fork(tf, &retval);
 		break;
 		case SYS_waitpid:
-		err = sys_waitpid(tf, &retval);
+		err = sys_waitpid(tf->tf_a0,tf->tf_a1, &retval);
 		break;
 		case SYS_getpid:
 		err = sys_getpid(&retval);
 		break;
 		case SYS__exit:
-		err = sys__exit();
+		err = sys__exit(tf->tf_a0, &retval);
 		break;
 		case SYS_read:
 		err = sys_read(tf, &retval);
@@ -139,30 +143,30 @@ mips_syscall(struct trapframe *tf)
 
 /* This is the entry point of the forked child process */
 int
-md_forkentry(struct trapframe* tf, struct addrspace* vmspace)
+md_forkentry(void* tf, unsigned long vmspace)
 {
-	assert (curspl == 1);
-	// (struct trapframe*) tf;
-	// (struct addrspace*) vmspace;
-	//tf->tf_epc += 4;
-	struct addrspace * child_vmspace = NULL;
-	// copy the parent vmspace
-	int result = as_copy(vmspace, &child_vmspace);
-	if (result) {
-		return result;
-	}
-	// we are a newly created thread with no vmspace!
-	assert(curthread-> t_vmspace == NULL);
-	// assign the copied addr space to this child process
-	curthread->t_vmspace = child_vmspace;
+	// int spl = splhigh();	
+	//kprintf(" process %d is in enter md_forkentry\n",curthread->pID);
+	struct trapframe child_tf;
+	struct trapframe *tf_parent = (struct trapframe*) tf;
+	assert(tf_parent != NULL);
+	// memcpy(child_tf, tf, sizeof(struct trapframe));
+
+
+	tf_parent->tf_epc += 4;
+	//we set the return value to be 0.
+	tf_parent->tf_v0 = 0;
+	tf_parent->tf_a3 = 0;
+
+	// Load Address Space of Child and Activate it.
+
+	curthread->t_vmspace = (struct addrspace*)vmspace;
+	assert(curthread->t_vmspace != NULL);
 	as_activate(curthread->t_vmspace);
 
-	// make sure the child start executing after the fork
-	tf->tf_epc += 4;
-	//we set the return value to be 0.
-	tf->tf_v0 = 0;
-	// jump back to where the fork was called
-	md_usermode(tf->tf_a0, tf->tf_a1, tf->tf_sp, tf->tf_epc);
+	child_tf = *tf_parent;
+	//kprintf("about to switch to user mode \n");
+	mips_usermode(&child_tf);
 
 	// we should never reach here
 	panic("switching to user mode returned\n");
@@ -174,96 +178,68 @@ md_forkentry(struct trapframe* tf, struct addrspace* vmspace)
 	If all pids are used up, returns an error --> try again later.
 */
 
+
 int allocate_PID(unsigned int * to_pid){
-	int spl = splhigh();
+	// int spl = splhigh();
+	assert(curspl > 0);
 	int i;
-	if (pid_count >= MAX_PID - 1) {  
-		//if the most recently used pid is outside the MAX_PID range, 
-		// we start over at the very beginning. 
-		pid_count = 1;
-	}
-		//  we find the next available pid  
-	for (i = pid_count; i < MAX_PID; i++) {
-		if (array_getguy(PCBs, i) == NULL){ 
-			pid_count = i;
+	//assert(process_counter >= 1 && process_counter < MAX_PID);
+
+	//  we find the first available slot 
+	for (i = 1; i < MAX_PID; i++) {
+		if (PCBs[i] == NULL){ 
 			*to_pid = i;
-			splx(spl);
 			return 0;
 		}
 	} 
-	for (i = pid_count; i > 1; i--) {
-		// if we didn't find an available pid in the 2nd half
-		// of the pcb array, it must be in the first half, if 
-		// there is one
-		if (array_getguy(PCBs, i) == NULL){ 
-			pid_count = i;
-			*to_pid = i;
-			splx(spl);
-			return 0;
-		}		
-	}
-
-	splx(spl);
+	
 	// reaching this line means there's no avaiable pid, try again later
 	return EAGAIN;
 }
 
+// #define CV_IMPL 1
 
-/**
-	Things to do in sys_fork():
-	1. Copy the 
-*/
 
 int sys_fork(struct trapframe *tf, int * retval){
-	/* In parent process */
 	int spl = splhigh();
-	int result;
-	struct thread* child_thread = NULL; 
-	// duplicate the parent's trapframe, note this trapframe is on kernel heap
+//	kprintf(" process %d enter sys_fork\n", curthread->pID);
+	struct addrspace * child_vmspace;
+	// copy the parent's address space
+	int result = as_copy(curthread->t_vmspace, &child_vmspace);
+	if(result){
+		splx(spl);
+		return result;
+	}
+	struct thread *child_thread = NULL;
+	// duplicate the parent's trapframe, which is on this kernel thread's stack
+	// we need to copy the trapframe to kernel heap
 	struct  trapframe* child_tf = kmalloc(sizeof(struct trapframe));
-	if(child_tf == NULL){
-		//return no-memory
+
+	if (child_tf == NULL) {
 		splx(spl);
 		return ENOMEM;
-	}
+	}	
 	*child_tf = *tf; 
 
-	// assign pID to child process
-	result = allocate_PID(&(child_thread->pID));
-	if (result) {
-		kfree(child_tf);
-		return result;
-	}
 	// create child thread/process
 	result =  thread_fork("child_process", 
-		(void*)child_tf, (unsigned long) curthread->t_vmspace, 
+		(void*)child_tf, (unsigned long)child_vmspace, 
 		md_forkentry,
 		&child_thread);
+	//kprintf("process %d now has child process %d\n",curthread->pID,child_thread->pID);
 
-	// place child process's pcb into process table
-	array_setguy(PCBs, child_thread->pID, child_thread);
-	// add child process to parent, place the child process'PID to children. 
-	if(curthread->children == NULL)
-	{
-		curthread->children = array_create();
-	}
-	array_add(curthread->children, &child_thread->pID);
-
-	if(result) {
-		splx(spl);
-		return result;
-	}
-	/* parent process returns PID */
+	assert(child_thread != NULL);
+	// parent returns the child pID
 	*retval = child_thread->pID;
 	splx(spl);
 	return 0;
 
 }
 
+	
 
 int sys_getpid(int32_t * retval){
 	int spl = splhigh();
-	assert(curthread->pID != 0);
 	*retval = curthread->pID;
 	splx(spl);
 	return 0;
@@ -272,27 +248,38 @@ int sys_getpid(int32_t * retval){
 
 /* Do two things 
 	1. put all children processes to init
-	2. set exited bit and signal parent
-	3. call thread_exit
+	2. set exited bit and save exit code 
+	3. wakeup parent
+	4. call thread_exit to perform cleanup
 */
-int sys__exit() {
-	int result = splhigh();
-	int i = 0;
-	struct thread* init = array_getguy(PCBs, 1);
-	// put all its children to init process
-	for(;i<array_getnum(curthread->children);i++){
 
-		array_add(init->children, array_getguy(curthread->children,i));
+int sys__exit(int exitcode, int32_t* retval) {
+
+	int result = splhigh();
+	
+	struct thread* init = PCBs[1]-> this_thread;
+	assert(init != NULL);
+
+	int current_pid = curthread->pID;
+	int i = 0;
+	// inherit all children of curthread to init 
+	for(; i < MAX_PID; i++){ 
+		if(PCBs[i] != NULL){
+			if(PCBs[i]->parent == current_pid)
+			{
+				PCBs[i]->parent = 1;
+			}
+		}
 	}
 
-	curthread->t_pcb.exited = 1; //indicates that the current thread has terminated.
-	//signal the parent process
-	thread_wakeup_single(curthread);
+	*retval = 0;
+
 	splx(result);
-	//here will delete address space, and it does not return.
-	thread_exit(); 
+
+	thread_exit(); //here handles address space deletion !
 	return 0;
 }
+	
 
 /* 
 	Basic Idea:
@@ -301,84 +288,160 @@ int sys__exit() {
 			(1). if so, delete its PCB.
 			(2). if not, sleep until it is waken up
 */
-int sys_waitpid(struct trapframe* tf, int32_t* retval){
-	u_int32_t child_pID = tf->tf_a0;
-	struct thread* child = NULL;
-	int i = 0;
+
+int sys_waitpid(int child_pID, int status, int *retval) {
 	int spl = splhigh();
-	for( ; i<array_getnum(curthread->children); i++){
-		child = array_getguy(curthread->children,i);
-		if(child->pID == child_pID){
-			break;
-		}
-		child = NULL;
+	int result;
+	int* status_user = &status;
+
+	u_int32_t* desired_pID = NULL;
+
+	int status_kernel = 0;
+	if(PCBs[curthread->pID] == NULL)
+		panic("Bad access to PCBs !");
+
+	if (status_user == NULL ) {
+		splx(spl);
+		return EFAULT;
 	}
-	if(child == NULL){
+
+	if (child_pID < MIN_PID || child_pID > MAX_PID) {
 		splx(spl);
 		return EINVAL;
 	}
 
-	//if child process has terminated
-	if(child->t_pcb.exited == 1){ 
-		array_setguy(PCBs, child_pID, NULL);
-		retval = child_pID;
+
+	if (child_pID == curthread->pID) {
+		splx(spl);
+		return EINVAL;
+	}
+
+
+
+	//check if the process with the child_pID belongs to the current process:
+	if(PCBs[child_pID]->parent != curthread->pID){
+		splx(spl);
+		return EINVAL;
+	}
+				
+	if(PCBs[child_pID] == NULL){
+			panic("wtf !");
+		}
+
+	//if child process has terminated...
+	if(PCBs[child_pID]->exited == 1){ 
+		assert(PCBs[child_pID] != NULL);
+		status_kernel = PCBs[child_pID]->exit_code;
+		// reap the child
+		destroy_pcb_unit(child_pID);
+		// result = copyout((const void *) &status_kernel, (userptr_t) status_user, sizeof(int));
+
+		// if(result){
+		// 	splx(spl);
+		// 	return EFAULT;
+		// }
+		*retval = child_pID;
 		splx(spl);
 		return 0;
 	}
 	else{ //if child process is still running
-		thread_sleep(child);
-		/* after the parent process wakes up, it returns the child-pID*/
-		array_setguy(PCBs,child_pID,NULL);
-		retval = child_pID; 
+		assert(PCBs[child_pID] != NULL);
+		
+			while(PCBs[child_pID]->exited != 1){
+				thread_sleep(child_pID);
+			}
+
+		status_kernel = PCBs[child_pID]->exit_code;
+		destroy_pcb_unit(child_pID);
+		// result = copyout((const void *) &status_kernel, (userptr_t) status_user, sizeof(int));
+		// if(result){
+			splx(spl);
+		// 	return EFAULT;
+		// }
+		*retval = child_pID; 
+		return 0;
 	}
-	splx(spl);
-	return 0;
+
+
+
 }
+
+void destroy_pcb_unit(u_int32_t pID)
+{
+	int result = splhigh();
+	if(PCBs[pID] == NULL){
+		splx(result);
+		return;
+	}
+	else
+	{
+		if(PCBs[pID]->mutex != NULL){
+			sem_destroy(PCBs[pID]->mutex);
+			PCBs[pID]->mutex = NULL;
+		}
+		PCBs[pID]->this_thread = NULL;
+		kfree(PCBs[pID]);
+		PCBs[pID] = NULL;
+		splx(result);
+		return;
+	}
+
+}
+
 
 int sys_read(struct trapframe * tf, int32_t* retval)
 {
 	int fd = tf->tf_a0;
-	void * user_buf = tf->tf_a1;
+	char * user_buf = (char*)tf->tf_a1;
 	int read_count = tf->tf_a2;
-	int * kernel_buf = kmalloc(sizeof(int)*read_count);
-	if(fd != 0) {
-		// must be STDIN
-		return EINVAL;
-	} else {
-		
-		int i = 0;
-		for( ; i<read_count; i++){
-			kernel_buf[i] = getch();
-		}
-		/* copies LEN bytes from a kernel-space address SRC to a
- 	 user-space address USERDEST.*/
-		copyout(kernel_buf, (userptr_t) user_buf, read_count);
+	if(read_count == 0 || user_buf == NULL || fd != 0){
+
+		return -1;
 	}
-	kfree(kernel_buf);
-	return 0;
+	
+
+	char kbuf;
+	int result;
+	kbuf = getch();
+	result = copyout(&kbuf, (userptr_t) user_buf, 1);
+	if(result != 0)
+		return result;
+	*retval = 1;
+	return 0;	
 }
 
-/* from user to kernel*/
+
+
 int sys_write(struct trapframe * tf, int32_t* retval) { 
 	int fd = tf->tf_a0;
-	void * user_buf = tf->tf_a1;
+	char * user_buf = (char*)tf->tf_a1;
 	int write_count = tf->tf_a2;
-	int * kernel_buf = kmalloc(sizeof(int)*write_count);
+	char * kernel_buf = kmalloc(sizeof(char) * write_count);
+	if (kernel_buf == NULL) {
+		return ENOMEM;
+	}
 	if (fd != 1) {
 		// must be STDOUT
 		return EINVAL;
 	} else {
-		/* copies LEN bytes from a user-space address USERSRC to a
- 		* kernel-space address DEST.*/
+		
 		copyin((const_userptr_t)user_buf, kernel_buf, write_count);
 		int i = 0;
 		for(; i < write_count; i++){
-			 kprintf("%c", (char)kernel_buf[i]);
+			kprintf("%c", kernel_buf[i]);	
 		}
+		*retval = write_count;
+		kfree(kernel_buf);
+		return 0;
 	}
 }
 
 
+
+int sys_execv(struct trapframe* tf){
+	return 0;
+}
+/*
 
 int sys_execv(struct trapframe* tf){
 	//clear the current thread's address space
@@ -408,6 +471,7 @@ int sys_execv(struct trapframe* tf){
 	assert(curthread->t_vmspace != NULL);
 	as_destroy(curthread->t_vmspace);
 	// prog_path and argv is in kernel
-	runprogram_execv(prog_path, argc, argv);
+	runprogram(prog_path, argc, argv);
 
-}
+}*/
+

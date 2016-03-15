@@ -22,12 +22,12 @@ typedef struct {
 	u_int16_t	e_machine;             /* processor type file is for */
 	u_int32_t	e_version;             /* ELF version */
 	u_int32_t	e_entry;           /* address of program entry point */
-	u_int32_t	e_phoff;           /* location in file of phdrs. Points to the start of the Program Header Table */
+	u_int32_t	e_phoff;           /* location in file of phdrs */
 	u_int32_t	e_shoff;           /* ignore */
 	u_int32_t	e_flags;	   /* ignore */
 	u_int16_t	e_ehsize;          /* actual size of file header */
-	u_int16_t	e_phentsize;       /* actual size of phdr. Size of Program Header Table entry */
-	u_int16_t	e_phnum;           /* number of phdrs, Number of entries in Program Header Table */
+	u_int16_t	e_phentsize;       /* actual size of phdr */
+	u_int16_t	e_phnum;           /* number of phdrs */
 	u_int16_t	e_shentsize;       /* ignore */
 	u_int16_t	e_shnum;           /* ignore */
 	u_int16_t	e_shstrndx;        /* ignore */
@@ -129,9 +129,8 @@ typedef struct {
 
 /*
  * "Program Header" - runtime segment header.
- * From Wikipedia: the Program Header Table tells the OS how to create a process
- * image. It is found at file offset e_phoff and consists of e_phnum entries, each
- * with size e_phentsize
+ * There are Ehdr.e_phnum of these located at one position within the file.
+ *
  * Note: if p_memsz > p_filesz, the leftover space should be zero-filled.
  */
 typedef struct {

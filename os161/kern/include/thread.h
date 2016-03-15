@@ -7,13 +7,33 @@
 
 /* Get machine-dependent stuff */
 #include <machine/pcb.h>
-
-#define MAX_PID 1024
- //the following macros will be used in syscall.c and runprogram.c
-#define MAX_ARG_LEN 1024
-#define MAX_ARGC 32
+#include <synch.h>
+#define MAX_PID 512
+#define MIN_PID 1 //the following macros will be used in syscall.c and runprogram.c
+#define MAX_ARG_LEN 256
+#define MAX_ARGC 16
 
 struct addrspace;
+// #define CV_IMPL 1
+
+typedef struct PCB_T {
+	int exited;
+	int exit_code;
+	struct thread* this_thread;
+	int parent; //parent process's pID.
+	//#ifndef CV_IMPL
+	struct semaphore * mutex;
+	//#else
+	//struct cv* cv;
+	//#endif
+} pcb_t;
+
+
+/******************** Global Process Table Lock ********************/ 
+struct lock * lock;
+
+/******************** Kernel Process Table ********************/ 
+pcb_t* PCBs [MAX_PID];
 
 struct thread {
 	/**********************************************************/
@@ -35,8 +55,6 @@ struct thread {
 	 * code.
 	 */
 	struct addrspace *t_vmspace;
-	struct array* children; //this array stores all its child processes.
-	unsigned int parent; // this is the parent process of this thread
 	/*
 	 * This is public because it isn't part of the thread system,
 	 * and is manipulated by the virtual filesystem (VFS) code.
@@ -119,6 +137,9 @@ void mi_threadstart(void *data1, unsigned long data2,
 
 /* Machine dependent context switch. */
 void md_switch(struct pcb *old, struct pcb *nu);
+
+
+int allocate_PID(unsigned int * to_pid);
 
 
 #endif /* _THREAD_H_ */

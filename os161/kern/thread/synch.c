@@ -337,7 +337,6 @@ cv_wait(struct cv *cv, struct lock *lock)
 void
 cv_signal(struct cv *cv, struct lock *lock)
 {
-	(void*) lock;
 	int spl = splhigh();
 	// if there's no threads waiting, this signal is ignored
 	if (thread_hassleepers(cv)) { 
@@ -351,7 +350,6 @@ cv_signal(struct cv *cv, struct lock *lock)
 void
 cv_broadcast(struct cv *cv, struct lock *lock)
 {
-	(void*) lock;
 	int spl = splhigh();
  
 	thread_wakeup(cv);

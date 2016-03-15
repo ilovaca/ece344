@@ -34,9 +34,12 @@ static struct array *zombies;
 /* Total number of outstanding threads. Does not count zombies[]. */
 static int numthreads;
 /* kernel PCB container */
-struct array * PCBs;
-/* current position in the PCBs */
-unsigned int pid_count;
+// struct array * PCBs;
+
+//unsigned int process_counter;
+
+// extern pcb_t * PCBs[MAX_PID];
+
 /*
  * Create a thread. This is used both to create the first thread's 
  * thread structure and to create subsequent threads.
@@ -65,8 +68,10 @@ thread_create(const char *name)
 
 	thread->t_cwd = NULL;
 
-	thread->children = NULL;
+	thread->pID = 0;
 	
+	
+
 	// If you add things to the thread structure, be sure to initialize
 	// them here.
 	
@@ -96,7 +101,7 @@ thread_destroy(struct thread *thread) //doesn't delete the pcb of this thread !
 	if (thread->t_stack) {
 		kfree(thread->t_stack);
 	}
-	array_destroy(thread->children);	
+	
 	kfree(thread->t_name);
 	kfree(thread); //here frees pcb!
 }
@@ -191,25 +196,20 @@ thread_bootstrap(void)
 	if (zombies==NULL) {
 		panic("Cannot create zombies array\n");
 	}
-	/* Initialize the kernel PCB structure */
-	
-	PCBs = array_create();
-	array_preallocate(PCBs, MAX_PID);
+	/* Initialize the kernel PCB structure */	
 	int i = 0;
 	for (; i < MAX_PID; i++) {
-		array_setguy(PCBs, i, NULL);
+		PCBs[i] = NULL;
 	}
 
-	pid_count = 1;
 	/*
 	 * Create the thread structure for the first thread
 	 * (the one that's already running)
 	 */
 	me = thread_create("<boot/menu>");
-	if (me==NULL) {
+	if (me == NULL) {
 		panic("thread_bootstrap: Out of memory\n");
 	}
-
 
 	/*
 	 * Leave me->t_stack NULL. This means we're using the boot stack,
@@ -223,9 +223,23 @@ thread_bootstrap(void)
 	curthread = me;
 
 	/* add this thread's PCB to kernel PCB structure */
-	array_setguy(PCBs, 1, &(curthread->t_pcb));
+	PCBs[1] = kmalloc(sizeof(pcb_t));
+	if(PCBs[1] == NULL){
+		panic("PCBs[1] can not be allocated.");
+	}
+	PCBs[1] -> exited = 0;
+	PCBs[1] -> exit_code = -1;
+	PCBs[1] -> this_thread = curthread;
+	PCBs[1] -> parent = -1;
+
+	//#ifdef SEM_IMPL
+	PCBs[1] -> mutex = sem_create("mux", 1);
+	//#elif CV_IMPL 
+	//PCBs[1] -> cv = cv_create("sds");
+	//#endif
+	
 	curthread->pID = 1;
-	/* Number of threads starts at 1 */
+
 	numthreads = 1;
 
 	/* Done */
@@ -251,6 +265,8 @@ thread_shutdown(void)
  * The new thread has name NAME, and starts executing in function FUNC.
  * DATA1 and DATA2 are passed to FUNC.
  */
+
+
 int
 thread_fork(const char *name, 
 	    void *data1, unsigned long data2,
@@ -260,6 +276,7 @@ thread_fork(const char *name,
 	struct thread *newguy;
 	int s, result;
 
+	//kprintf("enter thread_fork\n");
 	/* Allocate a thread */
 	newguy = thread_create(name);
 	if (newguy==NULL) {
@@ -291,6 +308,33 @@ thread_fork(const char *name,
 
 	/* Interrupts off for atomicity */
 	s = splhigh();
+
+
+	/************************ Allocating New pcb for child ***************************/
+
+	result = allocate_PID(&(newguy->pID));
+	//#ifdef CV_IMPL
+	//	lock_acquire(lock);
+	//#endif
+	// place child process's pcb into process table
+	PCBs[newguy->pID] = kmalloc(sizeof(pcb_t));
+	if(PCBs[newguy->pID] == NULL){
+		panic("PCBs allocateing child pcb failed");
+	}
+	PCBs[newguy->pID] -> exited = 0;
+	PCBs[newguy->pID] -> exit_code = -1;
+	PCBs[newguy->pID] -> this_thread = curthread;
+	PCBs[newguy->pID] -> parent = curthread-> pID;
+
+	//#ifdef SEM_IMPL
+		PCBs[newguy->pID] -> mutex = sem_create("child_process_mux", 1);
+	//#elif CV_IMPL
+	//	PCBs[newguy->pID] -> cv = cv_create("bar");
+	//	lock_release(lock);
+	//#endif
+	
+
+	/********************************************************************/
 
 	/*
 	 * Make sure our data structures have enough space, so we won't
@@ -417,8 +461,8 @@ mi_switch(threadstate_t nextstate)
 	 * Call the scheduler (must come *after* the array_adds)
 	 */
 	// the call to the scheduler will return the next thread to run
+	 
 	next = scheduler();
-
 	/* update curthread */
 	curthread = next;
 	
@@ -426,6 +470,7 @@ mi_switch(threadstate_t nextstate)
 	 * Call the machine-dependent code that actually does the
 	 * context switch.
 	 */
+	//kprintf("process %d is d_switch()\n",curthread->pID);
 	md_switch(&cur->t_pcb, &next->t_pcb);
 	
 	/*
@@ -453,6 +498,7 @@ mi_switch(threadstate_t nextstate)
 void
 thread_exit(void)
 {
+	//kprintf("process %d is in thread_exit\n",curthread->pID);
 	if (curthread->t_stack != NULL) {
 		/*
 		 * Check the magic number we put on the bottom end of
@@ -484,8 +530,16 @@ thread_exit(void)
 		curthread->t_cwd = NULL;
 	}
 
+	pcb_t* this_pcb = PCBs[curthread->pID];
+	this_pcb-> exited = 1;
+	this_pcb-> exit_code = 0;
+
 	assert(numthreads>0);
 	numthreads--;
+
+	//before the thread really exits, wake up the sleeping thread.
+	//V(PCBs[curthread->pID]->mutex);
+	thread_wakeup_single(curthread->pID);
 	mi_switch(S_ZOMB);
 	// LOL
 	panic("Thread came back from the dead!\n");
@@ -524,9 +578,19 @@ thread_sleep(const void *addr)
 	assert(in_interrupt==0);
 	
 	curthread->t_sleepaddr = addr;
+	
 	mi_switch(S_SLEEP);
+	
 	// after the switch returns the sleeps is waken up
 	curthread->t_sleepaddr = NULL;
+}
+
+void display(){
+	int i = 0;
+	for(;i<array_getnum(sleepers);i++){
+		struct thread* temp = array_getguy(sleepers,i);
+		kprintf("thread %d = %d\n", temp->pID,i);
+	}
 }
 
 /*
@@ -544,7 +608,8 @@ thread_wakeup(const void *addr)
 	// This is inefficient. Feel free to improve it.
 	// improvement 1: loop invariant array_getnum(sleepers)
 	// int num_sleepers = array_getnum(sleepers);
-
+	// if(numthreads>1)
+	// 	display();
 	for (i=0; i < array_getnum(sleepers); i++) {
 
 		struct thread *t = array_getguy(sleepers, i);
@@ -577,7 +642,7 @@ thread_wakeup_single (const void *addr)
 	// This is inefficient. Feel free to improve it.
 	// improvement 1: loop invariant array_getnum(sleepers)
 	// int num_sleepers = array_getnum(sleepers);
-
+//	kprintf("wake process %d 's sleeping process on %d\n",curthread->pID,(int)addr);
 	for (i=0; i < array_getnum(sleepers); i++) {
 
 		struct thread *t = array_getguy(sleepers, i);
@@ -590,11 +655,15 @@ thread_wakeup_single (const void *addr)
 			 * Because we preallocate during thread_fork,
 			 * this should never fail.
 			 */
+		//	kprintf("we will have put process %d into the run queue\n",t->pID);
 			result = make_runnable(t);
+			//kprintf("we haveb put process %d into the run queue\n",t->pID);
 			assert(result==0);
 			return;
 		}
 	}
+
+	//kprintf(" process is about to leave thread_wakeup_single\n");
 }
 
 /*
@@ -646,7 +715,7 @@ mi_threadstart(void *data1, unsigned long data2,
 	}
 #endif
 	
-	/* Call the function */
+	// /* Call the function */
 	func(data1, data2);
 
 	/* Done. */

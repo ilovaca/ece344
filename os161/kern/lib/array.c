@@ -100,7 +100,7 @@ int
 array_add(struct array *a, void *guy)
 {
 	int ix, result;
-
+	
 	ix = a->num;
 
 	result = array_setsize(a, ix+1);
