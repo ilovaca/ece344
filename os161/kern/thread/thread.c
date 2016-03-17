@@ -283,6 +283,7 @@ thread_fork(const char *name,
 		return ENOMEM;
 	}
 
+
 	/* Allocate a stack */
 	newguy->t_stack = kmalloc(STACK_SIZE);
 	if (newguy->t_stack==NULL) {
@@ -303,6 +304,8 @@ thread_fork(const char *name,
 		newguy->t_cwd = curthread->t_cwd;
 	}
 
+	//kprintf("fuck2\n");
+
 	/* Set up the pcb (this arranges for func to be called) */
 	md_initpcb(&newguy->t_pcb, newguy->t_stack, data1, data2, func);
 
@@ -313,6 +316,8 @@ thread_fork(const char *name,
 	/************************ Allocating New pcb for child ***************************/
 
 	result = allocate_PID(&(newguy->pID));
+
+
 	//#ifdef CV_IMPL
 	//	lock_acquire(lock);
 	//#endif

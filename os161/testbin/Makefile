@@ -47,3 +47,4 @@ all depend tags clean install:
 # But not:
 #    malloctest     (no malloc/free until you write it)
 #    userthreads    (no support in kernel API in base system)
+#	(cd printchar && $(MAKE) $@)

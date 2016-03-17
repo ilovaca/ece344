@@ -11,8 +11,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#define PageSize	4096
-#define NumPages	512
+#define PageSize	1024
+#define NumPages	256
 
 int sparse[NumPages][PageSize];	/* use only the first element in the row */
 

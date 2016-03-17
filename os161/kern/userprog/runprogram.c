@@ -44,6 +44,10 @@ int allocate_PID(unsigned int * to_pid);
 // argc and argv are in kernel, we need to copy it to the NEW addr space
 
 
+//ramsize=524288
+
+
+
 int
 runprogram(char *progname)
 {
@@ -97,12 +101,15 @@ runprogram(char *progname)
 	panic("md_usermode returned\n");
 	return EINVAL;
 }
-/*
+
+
+
 int 
-runprogram_exev(char *progname, char* argv[], int nargs)
+runprogram_exev(char *progname, char* args[], int nargs)
 {
 	struct vnode *v;
-	vaddr_t entrypoint, stackptr, temp;
+	int narg = nargs;
+	vaddr_t entrypoint, stackptr;	
 	int result;
 	// Open the file. 
 	result = vfs_open(progname, O_RDONLY, &v);
@@ -127,7 +134,6 @@ runprogram_exev(char *progname, char* argv[], int nargs)
 	result = load_elf(v, &entrypoint); // Load an ELF executable user program into the current address space and
 	// returns the entry point (initial PC) for the program in ENTRYPOINT.
 	if (result) {
-		 thread_exit destroys curthread->t_vmspace 
 		vfs_close(v);
 		return result;
 	}
@@ -141,192 +147,29 @@ runprogram_exev(char *progname, char* argv[], int nargs)
 		// thread_exit destroys curthread->t_vmspace 
 		return result;
 	}
-	// int counter = 0;
-	// while (1) {
-	// 	if (result) {
-	// 		result += result;
-	// 	} 
-	// 	counter ++;
-	// 	if (counter == 100) {
-	// 		break;
-	// 	}
-	// }
 
-	if(nargs > 1) {
-	// Copy arguments to user stack 
-
-
-	int i, str_len, size;
-	for(i = nargs - 1; i >= 0; i++){
-	    str_len = 1 + strlen(argv[i]); 		
-
-		stackptr -= str_len;
-		
-		result = copyoutstr(argv[i], (userptr_t)stackptr, str_len, &str_len); //copy the content from argv[i] to stackptr.
-		if(result){
-			panic("failed copycoutstr");
-		}
-		argv[i] = (char*)stackptr; 
-    }
-
-
-    result = 0;
-    while (1) {
-		if (result) {
-			result += result;
-		} 
-		counter ++;
-		if (counter == 100) {
-			break;
-		}
-	}
-
-	 // kprintf("1. the stackptr is at %x",stackptr);
-
-
-    // after copying the strings we adjust the stack pointer
-    
-    int arg_bytes = (nargs + 1) * sizeof(char*); 
-
-    argv[nargs] = NULL;
-
-    stackptr -= stackptr % 8;
-    
-    stackptr -= arg_bytes;
-
-	// stackptr -= ((stackptr - arg_bytes)%8);
-
-     kprintf("2. the stackptr is at %x",stackptr);
-
-
-   // stackptr -= (stackptr- arg_bytes)%8;
-
-    #define DIVROUNDUP(a,b) (((a)+(b)-1)/(b))
-	#define ROUNDUP(a,b)    (DIVROUNDUP(a,b)*b)
-
-
-    stackptr = ROUNDUP(stackptr,8);
-  
-    size_t diff = temp - stackptr;
-  
-    if(diff < arg_size){
-  	  stackptr -= ROUNDUP(arg_size - diff,8);
-    }
-    temp = stackptr+arg_size;
-    
-
-
-    
-
-    kprintf("3. the stackptr is at %x",stackptr);
-
-    temp = stackptr;
-    for(i = 0; i < nargs; i++){
-    	// temp -= sizeof(char*);
-      	result = copyout(&argv[i],(userptr_t)temp, sizeof(char*));
-      	if(result){
-      		panic("copyout failed");
-      	}
-      	temp += sizeof(char*);
-      	kprintf("the temp is at %x",temp);
-    }
-  	
-
-	md_usermode(nargs //argc,  stackptr//userspace addr of argv,
-		    stackptr, entrypoint); // go to user mode after loading an executable.
-	panic("md_usermode returned\n");
-	return EINVAL;
-	}
-	else {
-		
-	md_usermode(0 ,  NULL,
-		    stackptr, entrypoint); // go to user mode after loading an executable.
-	panic("md_usermode returned\n");
-	return EINVAL;		
-	}
-}
-
-*/
-
-
-int 
-runprogram_exev(char *progname, char* args[], int nargs)
-{
-	struct vnode *v;
-	int narg = nargs;
-vaddr_t entrypoint, stackptr,tmpptr;	int result;
-	// Open the file. 
-	result = vfs_open(progname, O_RDONLY, &v);
-	if (result) {
-		return result;
-	}
-
-	// We should be a new thread. 
-	assert(curthread->t_vmspace == NULL);
-
-	// Create a new address space. 
-	curthread->t_vmspace = as_create();
-	if (curthread->t_vmspace==NULL) {
-		vfs_close(v);
-		return ENOMEM;
-	}
-
-	// Activate it. 
-	as_activate(curthread->t_vmspace);
-
-	// Load the executable. 
-	result = load_elf(v, &entrypoint); // Load an ELF executable user program into the current address space and
-	// returns the entry point (initial PC) for the program in ENTRYPOINT.
-	if (result) {
-		vfs_close(v);
-		return result;
-	}
-
-	// Done with the file now. 
-	vfs_close(v);
-
-	// Define the user stack in the address space 
-	result = as_define_stack(curthread->t_vmspace, &stackptr);
-	if (result) {
-		// thread_exit destroys curthread->t_vmspace 
-		return result;
-	}
 	int j;
-   for(j = 0; j < narg; ++j){
-	//	kprintf("args-input: %s\n", args[i]);
-	    size_t len = 1 + strlen(args[j]);
-		size_t ssize = len*sizeof(char);
-		stackptr-=ssize;
-		  //  kprintf("ssize: %d\nstackptr:%x\n", ssize,stackptr);
+   	for(j = 0; j < narg; ++j){
+	    int len = 1 + strlen(args[j]);
+		stackptr -= len;
 
-		result = copyoutstr(args[j],(userptr_t)stackptr,ssize,&ssize); 
-		if(result){return result;}
+		result = copyoutstr(args[j],(userptr_t)stackptr, len, &len); 
+		if(result){
+			return result;
+		}
+		// this is fucking weird...
 		args[j] = (char*)stackptr;
-		//kprintf("args-address:%x\n", (unsigned int)args[i]);
     }
+
     args[narg] = NULL;
 
-    tmpptr = stackptr;
     size_t arg_size = (narg+1)*sizeof(char*);
-    stackptr-=arg_size;
-   // kprintf("stackptr:%x\n", stackptr);
-    stackptr = ROUNDUP(stackptr,8);
-   // kprintf("afterround-stackptr:%x\n", stackptr);
-    size_t diff = tmpptr-stackptr;
-   // kprintf("diff: %d\n arg_size:%d\n", diff,arg_size);
-    if(diff < arg_size){
-  	  stackptr-=ROUNDUP(arg_size-diff,8);
-    }
-    tmpptr = stackptr+arg_size;
-    int i;
-    for( i = narg;i >= 0;i--){
-      tmpptr-=sizeof(char*);
+    // align the stackptr to 8 byte aligned
+    stackptr -= arg_size;
+    stackptr -= stackptr % 8;
 
-      result = copyout(&args[i],(userptr_t)tmpptr,sizeof(char*));
-      if(result){return result;}
-    }
-
-	md_usermode(nargs ,  stackptr, stackptr, entrypoint); 
+    copyout(args, stackptr, arg_size);
+	md_usermode(nargs, stackptr, stackptr, entrypoint); 
 	panic("md_usermode returned\n");
 	return EINVAL;
 	

@@ -75,7 +75,7 @@ cmd_progthread(void *ptr, unsigned long nargs)
 	strcpy(progname, args[0]);
 
 	if(nargs > 1)
-		result = runprogram_exev(progname,args,nargs);
+		result = runprogram_exev(progname, args, nargs);
 	else
 		result = runprogram(progname);
 

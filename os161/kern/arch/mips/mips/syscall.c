@@ -221,6 +221,7 @@ int sys_fork(struct trapframe *tf, int * retval){
 	}	
 	*child_tf = *tf; 
 
+
 	// create child thread/process
 	result =  thread_fork("child_process", 
 		(void*)child_tf, (unsigned long)child_vmspace, 
@@ -235,6 +236,8 @@ int sys_fork(struct trapframe *tf, int * retval){
 	return 0;
 
 }
+
+
 
 	
 
