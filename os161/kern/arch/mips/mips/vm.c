@@ -44,7 +44,7 @@ vaddr_t
 alloc_kpages(int npages)
 {
 	paddr_t pa;
-	pa = getppages(npages);
+	pa = getppages(npages); //we obtain the physical address of allocated pages from memory.
 	if (pa==0) {
 		return 0;
 	}
@@ -96,7 +96,7 @@ vm_fault(int faulttype, vaddr_t faultaddress)
 
 	switch (faulttype) {
 	    case VM_FAULT_READONLY:
-		return EFAULT;
+			return EFAULT;
 	    case VM_FAULT_READ:
 	    case VM_FAULT_WRITE:
 		break;
@@ -118,85 +118,204 @@ vm_fault(int faulttype, vaddr_t faultaddress)
 	//u_int32_t vaddr_t
 
 
-	//Go through the link list of regions to check which region does this faultaddress fall into. Note that those regions don't include user stack!
-	as_section current_section = as->as_section_start;
-	vaddr_t fault_page_number = 0;
+	as_section cur = as->as_section_start;
+	vaddr_t faulting_PN = 0;
 	unsigned int prermission_bit = 0;
 
 	vaddr_t vbase,vtop;
+	//Go through the link list of regions to check which region does this faultaddress fall into. Note that those regions don't include user stack!
 
-	while(current_section != 0){
-		assert(current_section->as_vbase != 0);
-		assert(current_section->as_npages != 0);
-		assert((as->as_vbase & PAGE_FRAME) == as->as_vbase); //check as_vbase is page aligned. i.e.the as_vbase is divisible by 4K.
+	for (; cur != 0; cur = cur->as_next_section) {
 
-		vbase = current_section->as_vbase;
-		vtop = vbase + current_section->as_npages*PAGE_SIZE;
-		//we check if the faultaddress falls within this range:
+		assert(cur->as_vbase != 0);
+		assert(cur->as_npages != 0);
+		//check if the base address is page aligned. i.e.the as_vbase is divisible by 4K.
+		assert((as-> as_vbase & PAGE_FRAME) == as->as_vbase); 
+		// get the region bounds
+		vbase = cur-> as_vbase;
+		vtop = vbase + cur-> as_npages * PAGE_SIZE;
+		// check if the faultaddress falls within this region:
 		if(faultaddress >= vbase && faultaddress < vtop){
-			fault_page_number = faultaddress;
-			prermission_bit = current_section->as_permissions;
+			faulting_PN = faultaddress;
+			// TODO: WHAT IS THIS?
+			prermission_bit = cur->as_permissions;
 			break;
 		}
-		//if we still haven't found it, keep checking
-		current_section = current_section->as_next_section;
 	}
-
-	//if we didn't fall into any region, we check if it falles into the user stack.
-	assert(fault_page_number == 0);
+	//if we didn't fall into any region, we check if it falls into the user stack.
+	assert(faulting_PN == 0);
 	vtop = USERSTACK;
-	vbase = vtop - VM_STACKPAGES * PAGE_SIZE; //need to define VM_STACKPAGES later.... it should be a variable.
+	vbase = vtop - VM_STACKPAGES * PAGE_SIZE; // TODO need to define VM_STACKPAGES later.... it should be a variable.
 	if(faultaddress >= vbase && faultaddress < vtop)
 	{
-		fault_page_number = faultaddress;
+		faulting_PN = faultaddress;
+		//Here we set the user stack to be both readable and writable. 
 		prermission_bit |= (PF_W | PF_R); //stack is readable,writable but not executable ! 
+
 	}
 
 	//If faultaddress is still not within any range of the region and stack, then we return error code.
-	if(fault_page_number == 0) //Note: Since the top 1 GB is used for kernel space, so the user stack won't not start with 0x00000000, but 0x80000000.
+	if(faulting_PN == 0) //Note: Since the top 1 GB is used for kernel space, so the user stack won't not start with 0x00000000, but 0x80000000.
 	{
 		return EFAULT;
 	}
 
-	/* Once we found faultaddress falls into certan regions, then we do the masking to obtain level1_index and level2_index. 
-	Note that for 2-level page table: the top 10 bits are used as level1_index, and the immediate 10 bits are used as level2_index. And
-	the last 12 bits is the offset */
+	int err;
+	if (err = handle_vaddr_fault(faultaddress,paddr,prermission_bit)) {
+		return err;
+	}
+}
 
 	#define FIRST_LEVEL_PN 0xffc00000
 	#define SEC_LEVEL_PN 0x003fc000
-	unsigned int level1_index,level2_index;
+    #define PTE_VALID //TODO
+	#define PAGE_FRAME 0xfffff000	/* mask for getting page number from addr FIRST 20 bits*/
+	#define KVADDR_TO_PADDR(vaddr) ((vaddr)-MIPS_KSEG0)
+
+void as_zero_region(vaddr_t vaddr, size_t num_pages) {
+	vaddr_t * cur = vaddr;
+	int i = 0;
+	for (; i < num_pages*PAGE_SIZE; i++) {
+		*cur = 0;
+		 cur++;
+	} 
+}
+
+
+int handle_vaddr_fault (vaddr_t faultaddress,paddr_t paddr, unsigned int prermission_bit) {
+	/* Once we found faultaddress falls into certan regions, then we do the masking to obtain level1_index and level2_index. 
+	Note that for 2-level page table: the top 10 bits are used as level1_index, and the immediate 10 bits are used as level2_index. And
+	the last 12 bits is the offset */
+	unsigned int level1_index, level2_index;
+	vaddr_t vaddr;
+	u_int32_t ehi,elo;
+
+
 	level1_index = (faultaddress & FIRST_LEVEL_PN) >> 22; 
 	level2_index = (faultaddress & SEC_LEVEL_PN) >> 12;
 
 	vaddr_t * first_level_PTE = (vaddr_t*) (as->as_pagetable + level1_index * 4); // first-level PT contains a pointer to the 2nd level PT
 	if(*first_level_PTE != NULL) {
-		vaddr_t * second_level_PTE = (vaddr_t*) (*first_level_PTE + level2_index * 4);
-		// If the mapping exits in page table,
+		// If the second level page table exits,
         // get the address stores in PTE, 
         // translate it into physical address, 
         // check writeable flag,
         // and prepare the physical address for TLBLO
-        #define PTE_VALID
+		vaddr_t * second_level_PTE = (vaddr_t*) (*first_level_PTE + level2_index * 4);
 		if (*second_level_PTE & PTE_VALID) {
-			/* the PTE is valid */
+			/* the PTE is valid, meaning the requested page is currently in physical memory */
 			vaddr = *second_level_PTE & PAGE_FRAME; // get the physical page number
-			// do the virtual -> physical translation
+			// do the virtual -> physical translation, we get the physical page number
 			paddr = KVADDR_TO_PADDR(vaddr);
+
 			if (prermission_bit & PF_W) {
 				// if we intend to write, we set the TLB dirty bit
-				paddr |= TLBLO_DIRTY;
+				paddr |= TLBLO_DIRTY; //set DIRTY bit to 1. 
 			}
 		} else {
-			// PTE is invalid 
-		}
+			/* PTE invalid, we need */
+			// If not exists, do the mapping, 
+        	// update the PTE of the second page table,
+        	// check writeable flag,
 
+        	// and prepare the physical address for TLB
+			vaddr = alloc_kpages(1); //allocate a new page in 2nd page table. Upon this function call, there already exists a mapped 
+			//physical address.
+			assert(vaddr != 0);
+			as_zero_region(vaddr,1); //zero out the new page.
+			*second_level_PTE | = (vaddr | PTE_VALID); //set the VALID bit of the new page to 1, and assign second_level_PTE to this new 
+			//page's virtual address.
+			paddr = KVADDR_TO_PADDR(vaddr);
+
+			if (prermission_bit & PF_W) {
+				// if we intend to write, we set the TLB dirty bit
+				paddr |= TLBLO_DIRTY; //set DIRTY bit to 1. 
+			}
+		}
+	}
+	else
+	{
+		// If second page table even doesn't exists, 
+	    // create second page table,
+	    // do the mapping,
+	    // update the PTE,
+	    // and prepare the physical address.
+
+	    //Note: in both page tables, each entry stores virtual address, so each entry takes 4 bytes.
+
+	    //we allocate a new entry to first_level_PTE in level1, whic is used to point to the new level2 page table.
+		*first_level_PTE = alloc_kpages(1);
+		assert(*first_level_PTE != 0);
+		as_zero_region(*first_level_PTE,1); //zero out the new allocated page.
+
+		//let second_level_PTE point to the specified entry in level2 page table.
+		second_level_PTE = (vaddr_t *) (*first_level_PTE + level2_index*4);
+		//create a temporary vaddr pointer to point to an newly allocated viraddr which is used for the specified level2 page table entry
+		vaddr_t * temp = alloc_kpages(1);
+		assert(temp != 0);
+		as_zero_region(temp,1);
+
+		//assign the newly allocated viraddr with VALID bit setting to 1 to second_level_PTE.
+		*second_level_PTE = (temp | PTE_VALID);
+
+		//now we set up the corresponding physical address for second_level_PTE.
+		paddr = KVADDR_TO_PADDR(temp);
+		if(prermission_bit & PF_W){
+			paddr | = TLBLO_DIRTY; 
+		}
 
 	}
 
+	/*once we are here, it means that we can guarantee that there exists physical address in page table for faultaddress.
+	Now we need to update the TLB entry. Since TLB is global, we need to disable interrupts to manipute it. */
 
+	/* Basic Idea:
+		 if there still a empty TLB entry, insert new one in
+    	if not, randomly select one, throw it, insert new one in */
 
+	/* Note: #define NUM_TLB  64
+		 TLB_Read: read a TLB entry out of the TLB into ENTRYHI and ENTRYLO. INDEX specifies which one to get.
+ 	void TLB_Read(u_int32_t *entryhi, u_int32_t *entrylo, u_int32_t index); */
+
+	int spl = splhigh();
+
+	int k = 0;
 	
+	//we loop through the TLB, iterator k is used as the index in TLB list.
+	for(; k< NUM_TLB; k++){
+		//we read kth TLB entry out of the TLB into ENTRYHI and ENTRYLO, and check if this entry is valid. If so, we keep iterating,
+		TLB_Read(&ehi,&elo,k);
+		if(elo & TLBLO_VALID){
+			continue;
+		}
+
+		//recall: write the TLB entry specified by ENTRYHI and ENTRYLO
+		//void TLB_Write(u_int32_t entryhi, u_int32_t entrylo, u_int32_t index);
+
+		//once we find an empty entry, update it with ehi and elow.
+		ehi = faultaddress;
+		elo = paddr | TLBLO_VALID; // set the physical page frame 's  VALID bit to 1.
+		TLB_Write(ehi,elo,k);
+		splx(spl);
+		return 0;
+	}
+
+	//if we are here, meaning that the TLB is full, and we need to use replacement policy to kick one page out.
+
+	//dummy algorithm -----> randomly select a entry, and update it .
+	ehi = faultaddressl
+	elo = paddr | TLBLO_VALID;
+	TLB_Random(ehi,elo);
+	splx(spl);
+	return 0;
 }
+
+// /* values for p_flags */
+// #define	PF_R		0x4	/* Segment is readable */
+// #define	PF_W		0x2	/* Segment is writable */
+// #define	PF_X		0x1	/* Segment is executable */
+//#define TLBLO_DIRTY   0x00000400
+
 struct addrspace *
 as_create(void)
 {

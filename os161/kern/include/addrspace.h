@@ -24,6 +24,8 @@ struct addrspace {
 	paddr_t as_stackpbase;
 #else
 	/* Put stuff here for your VM system */
+	struct as_region *as_regions_start;    /* header of the regions linked list */
+    vaddr_t as_pagetable;               /* address of the first-level page table */
 #endif
 };
 
