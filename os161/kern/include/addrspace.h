@@ -13,6 +13,13 @@ struct vnode;
  * You write this.
  */
 
+ struct as_region{
+ 	vaddr_t vir_base;
+ 	size_t npages;
+ 	unsigned int as_permissions;
+ 	struct as_region *as_next_section;
+ };
+
 struct addrspace {
 #if OPT_DUMBVM
 	vaddr_t as_vbase1;
@@ -68,14 +75,14 @@ int               as_copy(struct addrspace *src, struct addrspace **ret);
 void              as_activate(struct addrspace *);
 void              as_destroy(struct addrspace *);
 
-int               as_define_region(struct addrspace *as, 
+int               	as_define_region(struct addrspace *as, 
 				   vaddr_t vaddr, size_t sz,
 				   int readable, 
 				   int writeable,
 				   int executable);
-int		  as_prepare_load(struct addrspace *as);
-int		  as_complete_load(struct addrspace *as);
-int               as_define_stack(struct addrspace *as, vaddr_t *initstackptr);
+int		  			as_prepare_load(struct addrspace *as);
+int		  			as_complete_load(struct addrspace *as);
+int              	as_define_stack(struct addrspace *as, vaddr_t *initstackptr);
 
 /*
  * Functions in loadelf.c

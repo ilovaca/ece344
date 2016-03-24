@@ -14,13 +14,11 @@ struct addrspace *
 as_create(void)
 {
 	struct addrspace *as = kmalloc(sizeof(struct addrspace));
-	if (as==NULL) {
+	if (as == NULL) {
 		return NULL;
 	}
-
-	/*
-	 * Initialize as needed.
-	 */
+	// region 
+	// first level page table
 
 	return as;
 }
@@ -31,7 +29,7 @@ as_copy(struct addrspace *old, struct addrspace **ret)
 	struct addrspace *newas;
 
 	newas = as_create();
-	if (newas==NULL) {
+	if (newas == NULL) {
 		return ENOMEM;
 	}
 

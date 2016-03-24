@@ -8,55 +8,235 @@
 #include <machine/spl.h>
 #include <machine/tlb.h>
 
-/*
- * Dumb MIPS-only "VM system" that is intended to only be just barely
- * enough to struggle off the ground. You should replace all of this
- * code while doing the VM assignment. In fact, starting in that
- * assignment, this file is not included in your kernel!
- */
+enum frame_state{
+	FREE,
+	FIXED, // some critical pages shall remain on physical memory
+	ALLOCATED; // TODO: can be changed to other states
+};
+/*************** Structure representing the physical pages/frames in memory ***************/
+typedef struct frame {
+	int pid;	// the process it belongs to
+	int frame_id;	// position in array
+	paddr_t frame_start; // the starting address of this page, needed for address translation
+	frame_state state; 
+	int num_pages_allocated; 
+} frame;
 
-/* under dumbvm, always have 48k of user stack */
-#define DUMBVM_STACKPAGES    12
+/*********************************** The coremap ******************************************/
+frame* coremap;
+size_t num_frames;
+size_t num_fixed_page;
+/******************************************************************************************/
+
+
+/* Things to do:
+ *	1. initialize the coremap, note we don't have vm yet.
+ *		
+ *
+ */ 
 
 void
 vm_bootstrap(void)
 {
+	u_int32_t start, end, start_adjusted;
 
+	size_t num_pages = 0;
+	// get the amount of physical memory
+	ram_getsize(&start, &end);
+	// make sure they're page aligned
+	// TODO: THIS ALIGNMENT IS PROBABLY NOT RIGHT
+	num_pages = (end / PAGE_SIZE) * PAGE_SIZE;
+	// kernel always looks at the virtual memory only
+	coremap = (frame *)PADDR_TO_KVADDR(start);
+	// allocate memory for the coremap
+	start_adjusted = start + num_pages * sizeof(struct frame); 
+
+	/************************************** initialize coremap *************************************/
+	int i = 0, fixed_pages, free_pages;
+	fixed_pages = (start_adjusted - start) / PAGE_SIZE;
+	// mark the pages in [start, start_adjusted] as fixed
+	for (; i < fixed_pages; i++) { 
+		coremap[i].pid = -1;
+		coremap[i].frame_id = i;
+		coremap[i].frame_start = start + PAGE_SIZE * i;
+		coremap[i].frame_state = FIXED;
+		coremap[i].num_pages_allocated = 0;
+	}
+	// mark the pages in [start_adjusted, end] as free 
+	free_pages = num_pages - fixed_pages;
+	assert(num_pages == (fixed_pages + free_pages));
+
+	for (; i < free_pages; i++) {
+		coremap[i].pid = -1;
+		coremap[i].frame_id = i;
+		coremap[i].frame_start = start_adjusted + PAGE_SIZE * i;
+		coremap[i].frame_state = FREE;
+		coremap[i].num_pages_allocated = 0;
+	}
+
+	// sanity check
+	for (i = 0; i < num_frames; i++) {
+		if (coremap[i].state != FREE && coremap[i].state != FIXED) panic("error initializing the coremap"); 
+	}
+	// globals
+	num_frames = num_pages;
+	num_fixed_page = fixed_pages;
+	/**************************************** END of init ******************************************/
+	// TODO: we may want to set some flags to indicate that vm has already bootstrapped, 
 }
 
-static
-paddr_t
-getppages(unsigned long npages)
-{
-	int spl;
-	paddr_t addr;
 
-	spl = splhigh();
+/*
+	Function that makes room for a single page
+	Page replacement policy (experimental) >>>>> randomly evict a page
+	Depending on the state of the page, we either
+		** evict the page, should the page be clean,
+		or
+	 	** swap to disk, should the page be dirty
+	@return the id of the freed frame
+*/
+int evict_or_swap(){
+	assert(curspl > 0);
+	int kicked_ass_page;
+	do{
+		kicked_ass_page = random() % num_frames;
+	} while (coremap[kicked_ass_page].frame_state != ALLOCATED);
 
-	addr = ram_stealmem(npages);
+	/* TODO need to write to disk the page */
 	
-	splx(spl);
-	return addr;
 }
+
+
+/*
+	Allocates a single page
+	@return starting address of the newly allocated page
+*/
+vaddr_t alloc_one_page() {
+	assert(curspl > 0);
+	int i = 0;
+	// go through the coremap check if there's a free page
+	for (; i < num_frames; i++) {
+		if (coremap[i].frame_state == FREE) {
+			coremap[i].frame_state = ALLOCATED;
+			coremap[i].num_pages_allocated = 1; 
+			return PADDR_TO_KVADDR(coremap[i].frame_start);
+		}
+	}
+
+	// no free page available right now --> we need to evict/swap a page
+	int kicked_ass_page = evict_or_swap();
+	// now do the allocation
+	coremap[kicked_ass_page].pid = curthread->pID;
+	coremap[kicked_ass_page].frame_state = ALLOCATED;
+	coremap[kicked_ass_page].num_pages_allocated = 1;
+	return PADDR_TO_KVADDR(coremap[kicked_ass_page].frame_start);
+}
+
+
+/*
+	Allocate npages.
+*/
+vaddr_t alloc_npages(int npages) {
+	assert(curspl > 0);
+	int num_continous = 0;
+	int i = 0; 
+	// find if there're npages in succession
+	for (; i < num_frames - 1; i++){
+		// as long as we've got enough, we break:)
+		if (num_continous >= npages) break;
+		if (coremap[i].frame_state == FREE && coremap[i + 1].frame_state == FREE) {
+			num_continous++;
+		} else {
+			num_continous = 0;
+		}
+	}
+	assert(num_continous == npages);
+	if (num_continous >= npages) {
+		// found n continous free pages
+		int j = i;
+		for (; j > i - npages; j--)
+		{
+			coremap[j].pid = curthread->pID;
+			coremap[j].frame_state = ALLOCATED;
+			// redundancy not a problem ;)
+			coremap[j].num_pages_allocated = npages; 
+		}
+		return PADDR_TO_KVADDR(coremap[j].frame_start);
+
+	} else {
+		// not found, we evict n pages starting from a random page
+		// make sure the n pages does not overflow the end of memory
+		// 		--> search the first num_frames - npages, excluding the fixed pages
+		int kicked_ass_page;
+		int search_range = num_frames - npages - num_fixed_page;
+		do{
+			kicked_ass_page = (random() % search_range) + num_fixed_page;
+		} while (coremap[kicked_ass_page].frame_state != ALLOCATED);
+
+		assert(coremap[kicked_ass_page].frame_state == ALLOCATED);
+		// sanity check
+		int i = 0;
+		for (; i < npages; i++) {
+			if (coremap[i + kicked_ass_page].frame_state == FIXED) panic("alloc_npages contains a fixed page"); 
+		}
+		// evict/swap to disk
+		for (i = 0; i < npages; i++) {
+
+			/*
+	
+			 TODO: swap to disk 
+
+			*/
+			coremap[kicked_ass_page + i].pid = curthread->pID;
+			coremap[kicked_ass_page + i].frame_state = ALLOCATED;
+			coremap[kicked_ass_page + i].num_pages_allocated = npages; 
+		}
+		return PADDR_TO_KVADDR(coremap[kicked_ass_page].frame_start);
+	}
+}
+
 
 /* Allocate/free some kernel-space virtual pages */
 vaddr_t 
 alloc_kpages(int npages)
-{
-	paddr_t pa;
-	pa = getppages(npages); //we obtain the physical address of allocated pages from memory.
-	if (pa==0) {
-		return 0;
-	}
-	return PADDR_TO_KVADDR(pa);
+{	
+	int spl = splhigh();
+	ret_addr = (npages == 1) ? alloc_one_page() : alloc_npages(npages);
+	splx(spl);
+	return; 
 }
+
+/*
+	Function to free a certain number of pages given *ONLY* the starting address of the page.
+	*** The given address is page aligned ***
+	To know the number of pages to free here, we need to store information in the page structure
+	when we do the page allocation accordingly.
+*/
 
 void 
 free_kpages(vaddr_t addr)
-{
-	/* nothing */
+{	
+	// the addr must be page aligned
+	assert(addr % PAGE_SIZE == 0);
 
-	(void)addr;
+	int spl = splhigh();
+	int i = 0;
+	for (i = 0; i < num_frames; i++) {
+		if (PADDR_TO_KVADDR(coremap[i].frame_start) == addr) {
+			// found the starting page
+			int numpage_to_free = coremap[i].num_pages_allocated;
+			int j;
+			for (j = 0; j < numpage_to_free; j++) {
+				coremap[j + i].frame_state = FREE;
+				coremap[j + i].num_pages_allocated = 0;
+			}
+			splx(spl);
+			return;
+		}
+	}
+	// not found 
+	splx(spl);
+	panic("invalid addr to free_kpages");
 }
 
 /*
@@ -118,30 +298,38 @@ vm_fault(int faulttype, vaddr_t faultaddress)
 	//u_int32_t vaddr_t
 
 
-	as_section cur = as->as_section_start;
+	as_region cur = as->as_regions_start;
 	vaddr_t faulting_PN = 0;
-	unsigned int prermission_bit = 0;
+	unsigned int permission_bit = 0;
 
 	vaddr_t vbase,vtop;
 	//Go through the link list of regions to check which region does this faultaddress fall into. Note that those regions don't include user stack!
 
+
+/* struct as_region{
+ 	vaddr_t vir_base;
+ 	size_t npages;
+ 	unsigned int as_permissions;
+ 	struct as_region *as_next_section;
+ };
+*/
+
 	for (; cur != 0; cur = cur->as_next_section) {
 
-		assert(cur->as_vbase != 0);
+	/*	assert(cur->as_vbase != 0);
 		assert(cur->as_npages != 0);
 		//check if the base address is page aligned. i.e.the as_vbase is divisible by 4K.
-		assert((as-> as_vbase & PAGE_FRAME) == as->as_vbase); 
-		// get the region bounds
-		vbase = cur-> as_vbase;
-		vtop = vbase + cur-> as_npages * PAGE_SIZE;
+
+		assert((as-> as_vbase & PAGE_FRAME) == as->as_vbase);  */
+
 		// check if the faultaddress falls within this region:
-		if(faultaddress >= vbase && faultaddress < vtop){
+		if(faultaddress >= cur->vir_base && faultaddress < (vbase + npages * PAGE_SIZE)){
 			faulting_PN = faultaddress;
-			// TODO: WHAT IS THIS?
-			prermission_bit = cur->as_permissions;
+			permission_bit = cur->as_permissions;
 			break;
 		}
 	}
+
 	//if we didn't fall into any region, we check if it falls into the user stack.
 	assert(faulting_PN == 0);
 	vtop = USERSTACK;
@@ -150,7 +338,7 @@ vm_fault(int faulttype, vaddr_t faultaddress)
 	{
 		faulting_PN = faultaddress;
 		//Here we set the user stack to be both readable and writable. 
-		prermission_bit |= (PF_W | PF_R); //stack is readable,writable but not executable ! 
+		permission_bit |= (PF_W | PF_R); //stack is readable,writable but not executable ! 
 
 	}
 
@@ -161,7 +349,7 @@ vm_fault(int faulttype, vaddr_t faultaddress)
 	}
 
 	int err;
-	if (err = handle_vaddr_fault(faultaddress,paddr,prermission_bit)) {
+	if (err = handle_vaddr_fault(faultaddress,paddr,permission_bit)) {
 		return err;
 	}
 }
@@ -172,17 +360,11 @@ vm_fault(int faulttype, vaddr_t faultaddress)
 	#define PAGE_FRAME 0xfffff000	/* mask for getting page number from addr FIRST 20 bits*/
 	#define KVADDR_TO_PADDR(vaddr) ((vaddr)-MIPS_KSEG0)
 
-void as_zero_region(vaddr_t vaddr, size_t num_pages) {
-	vaddr_t * cur = vaddr;
-	int i = 0;
-	for (; i < num_pages*PAGE_SIZE; i++) {
-		*cur = 0;
-		 cur++;
-	} 
-}
 
 
-int handle_vaddr_fault (vaddr_t faultaddress,paddr_t paddr, unsigned int prermission_bit) {
+
+
+int handle_vaddr_fault (vaddr_t faultaddress,paddr_t paddr, unsigned int permission_bit) {
 	/* Once we found faultaddress falls into certan regions, then we do the masking to obtain level1_index and level2_index. 
 	Note that for 2-level page table: the top 10 bits are used as level1_index, and the immediate 10 bits are used as level2_index. And
 	the last 12 bits is the offset */
@@ -227,7 +409,7 @@ int handle_vaddr_fault (vaddr_t faultaddress,paddr_t paddr, unsigned int prermis
 			//page's virtual address.
 			paddr = KVADDR_TO_PADDR(vaddr);
 
-			if (prermission_bit & PF_W) {
+			if (permission_bit & PF_W) {
 				// if we intend to write, we set the TLB dirty bit
 				paddr |= TLBLO_DIRTY; //set DIRTY bit to 1. 
 			}
@@ -260,7 +442,7 @@ int handle_vaddr_fault (vaddr_t faultaddress,paddr_t paddr, unsigned int prermis
 
 		//now we set up the corresponding physical address for second_level_PTE.
 		paddr = KVADDR_TO_PADDR(temp);
-		if(prermission_bit & PF_W){
+		if(permission_bit & PF_W){
 			paddr | = TLBLO_DIRTY; 
 		}
 
@@ -303,7 +485,7 @@ int handle_vaddr_fault (vaddr_t faultaddress,paddr_t paddr, unsigned int prermis
 	//if we are here, meaning that the TLB is full, and we need to use replacement policy to kick one page out.
 
 	//dummy algorithm -----> randomly select a entry, and update it .
-	ehi = faultaddressl
+	ehi = faultaddress;
 	elo = paddr | TLBLO_VALID;
 	TLB_Random(ehi,elo);
 	splx(spl);
@@ -316,163 +498,16 @@ int handle_vaddr_fault (vaddr_t faultaddress,paddr_t paddr, unsigned int prermis
 // #define	PF_X		0x1	/* Segment is executable */
 //#define TLBLO_DIRTY   0x00000400
 
-struct addrspace *
-as_create(void)
-{
-	struct addrspace *as = kmalloc(sizeof(struct addrspace));
-	if (as==NULL) {
-		return NULL;
-	}
 
-	as->as_vbase1 = 0;
-	as->as_pbase1 = 0;
-	as->as_npages1 = 0;
-	as->as_vbase2 = 0;
-	as->as_pbase2 = 0;
-	as->as_npages2 = 0;
-	as->as_stackpbase = 0;
-
-	return as;
+/*
+	Function to clear the content of the page
+*/
+void as_zero_region(vaddr_t vaddr, size_t num_pages) {
+	vaddr_t * cur = vaddr;
+	int i = 0;
+	for (; i < num_pages * PAGE_SIZE; i++) {
+		*cur = 0;
+		 cur++;
+	} 
 }
 
-void
-as_destroy(struct addrspace *as)
-{
-	kfree(as);
-}
-
-void
-as_activate(struct addrspace *as)
-{
-	int i, spl;
-
-	(void)as;
-
-	spl = splhigh();
-
-	for (i=0; i<NUM_TLB; i++) {
-		TLB_Write(TLBHI_INVALID(i), TLBLO_INVALID(), i);
-	}
-
-	splx(spl);
-}
-
-int
-as_define_region(struct addrspace *as, vaddr_t vaddr, size_t sz,
-		 int readable, int writeable, int executable)
-{
-	size_t npages; 
-
-	/* Align the region. First, the base... */
-	sz += vaddr & ~(vaddr_t)PAGE_FRAME;
-	vaddr &= PAGE_FRAME;
-
-	/* ...and now the length. */
-	sz = (sz + PAGE_SIZE - 1) & PAGE_FRAME;
-
-	npages = sz / PAGE_SIZE;
-
-	/* We don't use these - all pages are read-write */
-	(void)readable;
-	(void)writeable;
-	(void)executable;
-
-	if (as->as_vbase1 == 0) {
-		as->as_vbase1 = vaddr;
-		as->as_npages1 = npages;
-		return 0;
-	}
-
-	if (as->as_vbase2 == 0) {
-		as->as_vbase2 = vaddr;
-		as->as_npages2 = npages;
-		return 0;
-	}
-
-	/*
-	 * Support for more than two regions is not available.
-	 */
-	kprintf("dumbvm: Warning: too many regions\n");
-	return EUNIMP;
-}
-
-int
-as_prepare_load(struct addrspace *as)
-{
-	assert(as->as_pbase1 == 0);
-	assert(as->as_pbase2 == 0);
-	assert(as->as_stackpbase == 0);
-
-	as->as_pbase1 = getppages(as->as_npages1);
-	if (as->as_pbase1 == 0) {
-		return ENOMEM;
-	}
-
-	as->as_pbase2 = getppages(as->as_npages2);
-	if (as->as_pbase2 == 0) {
-		return ENOMEM;
-	}
-
-	as->as_stackpbase = getppages(DUMBVM_STACKPAGES);
-	if (as->as_stackpbase == 0) {
-		return ENOMEM;
-	}
-
-	return 0;
-}
-
-int
-as_complete_load(struct addrspace *as)
-{
-	(void)as;
-	return 0;
-}
-
-int
-as_define_stack(struct addrspace *as, vaddr_t *stackptr)
-{
-	assert(as->as_stackpbase != 0);
-
-	*stackptr = USERSTACK;
-	return 0;
-}
-
-int
-as_copy(struct addrspace *old, struct addrspace **ret)
-{
-	struct addrspace *new;
-
-	new = as_create();
-	if (new==NULL) {
-		return ENOMEM;
-	}
-
-	new->as_vbase1 = old->as_vbase1;
-	new->as_npages1 = old->as_npages1;
-	new->as_vbase2 = old->as_vbase2;
-	new->as_npages2 = old->as_npages2;
-
-	if (as_prepare_load(new)) {
-		as_destroy(new);
-		return ENOMEM;
-	}
-
-	assert(new->as_pbase1 != 0);
-	assert(new->as_pbase2 != 0);
-	assert(new->as_stackpbase != 0);
-
-	memmove((void *)PADDR_TO_KVADDR(new->as_pbase1),
-		(const void *)PADDR_TO_KVADDR(old->as_pbase1),
-		old->as_npages1*PAGE_SIZE);
-
-	memmove((void *)PADDR_TO_KVADDR(new->as_pbase2),
-		(const void *)PADDR_TO_KVADDR(old->as_pbase2),
-		old->as_npages2*PAGE_SIZE);
-
-	memmove((void *)PADDR_TO_KVADDR(new->as_stackpbase),
-		(const void *)PADDR_TO_KVADDR(old->as_stackpbase),
-		DUMBVM_STACKPAGES*PAGE_SIZE);
-	
-	*ret = new;
-	return 0;
-}
