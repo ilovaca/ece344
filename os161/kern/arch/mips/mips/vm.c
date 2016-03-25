@@ -483,11 +483,12 @@ int handle_vaddr_fault (vaddr_t faultaddress, paddr_t paddr, unsigned int permis
 			}
 		}
 	} else {
-		// If second page table doesn't exists, 
-	    // create second page table,
+		// If second page table doesn't exists, create second page table,
 		level2_pagetable = kmalloc(sizeof(struct as_pagetable));
 	    // allocate a page and do the mapping,
+		paddr = alloc_kpages(1);
 
+		
 	    // update the PTE,
 	    // and prepare the physical address.
 
