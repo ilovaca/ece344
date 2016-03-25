@@ -4,7 +4,19 @@
 #include <vm.h>
 #include "opt-dumbvm.h"
 
+#define FIRST_LEVEL_PT_SIZE 1024
+#define SECOND_LEVEL_PT_SIZE 1024
 struct vnode;
+
+/*
+	Page table entry format:
+	|<----- 20 ----->|1|<---- 11 ---->|
+		physical
+
+*/
+struct as_pagetable{
+	u_int32_t PTE [SECOND_LEVEL_PT_SIZE];
+};
 
 /* 
  * Address space - data structure associated with the virtual memory
@@ -12,7 +24,6 @@ struct vnode;
  *
  * You write this.
  */
-
  struct as_region{
  	vaddr_t vir_base;
  	size_t npages;
@@ -32,7 +43,8 @@ struct addrspace {
 #else
 	/* Put stuff here for your VM system */
 	struct as_region *as_regions_start;    /* header of the regions linked list */
-    vaddr_t as_pagetable;               /* address of the first-level page table */
+    // vaddr_t as_master_pagetable;        /* address of the first-level page table */
+    struct as_pagetable* as_master_pagetable[1024]; // first level page table
 #endif
 };
 

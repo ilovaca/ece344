@@ -10,6 +10,13 @@
  * used. The cheesy hack versions in dumbvm.c are used instead.
  */
 
+
+
+/*
+	in as_create, we just allocate a addrspace structure using kmalloc, and allocate a physical 
+	page (using page_alloc) as page directory and store it's address (either KVADDR or PADDR is OK, 
+	but you can just choose one).
+*/
 struct addrspace *
 as_create(void)
 {
@@ -17,9 +24,15 @@ as_create(void)
 	if (as == NULL) {
 		return NULL;
 	}
-	// region 
-	// first level page table
+	// initiailize first level page table
+	int i = 0;
+	for (; i < FIRST_LEVEL_PT_SIZE; i++){
+		as_master_pagetable[i] = NULL;
+	}
 
+	// for now we only allocate *ONE* 2nd level PT
+	as_master_pagetable[0] = kmalloc(sizeof(struct as_pagetable));
+	// allocate a page and then update it.
 	return as;
 }
 
