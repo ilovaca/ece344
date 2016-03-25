@@ -9,11 +9,13 @@
 struct vnode;
 
 /*
-	Page table entry format:
-	|<----- 20 ----->|1|<---- 11 ---->|
-		physical
-
+	PTE format:
+	|<----- 20 ----->|<--  1  -->|<---- 11 ---->|
+		frame #        present?     unused
+	
 */
+#define PTE_PRESENT 0x00000800
+#define PTE_SWAPPED 0xfffff7ff
 struct as_pagetable{
 	u_int32_t PTE [SECOND_LEVEL_PT_SIZE];
 };
@@ -44,7 +46,7 @@ struct addrspace {
 	/* Put stuff here for your VM system */
 	struct as_region *as_regions_start;    /* header of the regions linked list */
     // vaddr_t as_master_pagetable;        /* address of the first-level page table */
-    struct as_pagetable* as_master_pagetable[1024]; // first level page table
+    struct as_pagetable *as_master_pagetable[FIRST_LEVEL_PT_SIZE]; // first level page table
 #endif
 };
 
