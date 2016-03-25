@@ -114,7 +114,6 @@ vm_bootstrap(void)
 	// globals
 	num_frames = num_pages;
 	num_fixed_page = fixed_pages;
-	
 	/**************************************** END of init ******************************************/
 	// TODO: we may want to set some flags to indicate that vm has already bootstrapped, 
 }
@@ -164,8 +163,7 @@ int evict_or_swap(){
 	} else {
 		// page clean, no need for swap, just update the PTE and return
 	}
-	// update PTE to SWAPPED and return frame id for loading/allocation
-	// go find where the frame was originally mapped to, and update that 
+	// update PTE of the *swapped* page and return frame id for loading/allocation
 	u_int32_t *pte = get_PTE(coremap[kicked_ass_page].owner_thread,
 							 coremap[kicked_ass_page].mapped_vaddr);
 	// set the swapped bit (PRESENT BIT = 0)
@@ -195,8 +193,10 @@ vaddr_t alloc_one_page() {
 	// now do the allocation
 	coremap[kicked_ass_page].owner_thread = curthread;
 	coremap[kicked_ass_page].frame_state = ALLOCATED;
+	coremap[kicked_ass_page].mapped_vaddr = PADDR_TO_KVADDR(coremap[kicked_ass_page].frame_start);
 	coremap[kicked_ass_page].num_pages_allocated = 1;
-	return PADDR_TO_KVADDR(coremap[kicked_ass_page].frame_start);
+	// return the physical page number 
+	return (coremap[kicked_ass_page].mapped_vaddr);
 }
 
 /*
