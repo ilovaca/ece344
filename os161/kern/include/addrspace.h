@@ -27,10 +27,10 @@ struct as_pagetable{
  * You write this.
  */
  struct as_region{
- 	vaddr_t vir_base;
+ 	vaddr_t vbase;
  	size_t npages;
- 	unsigned int as_permissions;
- 	struct as_region *as_next_section;
+ 	unsigned int region_permis;
+ 	// struct as_region *as_next_section;
  };
 
 struct addrspace {
@@ -44,7 +44,8 @@ struct addrspace {
 	paddr_t as_stackpbase;
 #else
 	/* Put stuff here for your VM system */
-	struct as_region *as_regions_start;    /* header of the regions linked list */
+	// struct as_region *as_regions_start;    /* header of the regions linked list */
+	struct array* as_regions;
     // vaddr_t as_master_pagetable;        /* address of the first-level page table */
     struct as_pagetable *as_master_pagetable[FIRST_LEVEL_PT_SIZE]; // first level page table
 #endif

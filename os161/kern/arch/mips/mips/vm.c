@@ -331,13 +331,9 @@ vm_fault(int faulttype, vaddr_t faultaddress)
 
 	spl = splhigh();
 
-	//Align faultaddress
-	faultaddress &= PAGE_FRAME; //PAGE_FRAME: 0xfffff000 =  mask for getting page number from addr 
+	faultaddress &= PAGE_FRAME; 
 
-	//Upon this step, faultaddress is the page number from the passed address.
-
-
-	DEBUG(DB_VM, "dumbvm: fault: 0x%x\n", faultaddress);
+	DEBUG(DB_VM, "vm: fault: 0x%x\n", faultaddress);
 
 	switch (faulttype) {
 	    case VM_FAULT_READONLY:
@@ -351,6 +347,7 @@ vm_fault(int faulttype, vaddr_t faultaddress)
 	}
 
 	as = curthread->t_vmspace;
+
 	if (as == NULL) {
 		/*
 		 * No address space set up. This is probably a kernel
@@ -360,62 +357,51 @@ vm_fault(int faulttype, vaddr_t faultaddress)
 		return EFAULT;
 	}
 
-	//u_int32_t vaddr_t
-
-
-	as_region cur = as->as_regions_start;
+	// as_region cur = as->as_regions_start;
 	vaddr_t faulting_PN = 0;
 	unsigned int permission_bit = 0;
+	vaddr_t vbase, vtop;
+	//Go through the array of regions to check which region does this faultaddress fall into. Note that those regions don't include user stack!
 
-	vaddr_t vbase,vtop;
-	//Go through the link list of regions to check which region does this faultaddress fall into. Note that those regions don't include user stack!
+	int i = 0;
+	int found = 0;
+	for (; i < array_getnum(as->as_regions); i++) {
 
+		struct as_region * cur = array_getguy(as->as_regions, i);
+		vbase = cur->vbase;
+		vtop = vbase + cur->npages * PAGE_SIZE;
+		// base addr should be page aligned
+		assert((cur->vbase & PAGE_FRAME) == cur->as_vbase);  
 
-/* struct as_region{
- 	vaddr_t vir_base;
- 	size_t npages;
- 	unsigned int as_permissions;
- 	struct as_region *as_next_section;
- };
-*/
-
-	for (; cur != 0; cur = cur->as_next_section) {
-
-	/*	assert(cur->as_vbase != 0);
-		assert(cur->as_npages != 0);
-		//check if the base address is page aligned. i.e.the as_vbase is divisible by 4K.
-
-		assert((as-> as_vbase & PAGE_FRAME) == as->as_vbase);  */
-
-		// check if the faultaddress falls within this region:
-		if(faultaddress >= cur->vir_base && faultaddress < (vbase + npages * PAGE_SIZE)){
-			faulting_PN = faultaddress;
-			permission_bit = cur->as_permissions;
-			break;
+		// find which region the faulting address belongs to
+		if(faultaddress >= vbase && faultaddress < vtop){
+			// faulting_PN = faultaddress;
+			// permission_bit = cur->region_permis;
+			found = 1;
+			int err = handle_vaddr_fault(faultaddress, paddr, cur->region_permis); 
+			splx(spl);
+			return err;
+			/**********************************************************/
 		}
 	}
 
 	//if we didn't fall into any region, we check if it falls into the user stack.
-	assert(faulting_PN == 0);
-	vtop = USERSTACK;
-	vbase = vtop - VM_STACKPAGES * PAGE_SIZE; // TODO need to define VM_STACKPAGES later.... it should be a variable.
-	if(faultaddress >= vbase && faultaddress < vtop)
-	{
-		faulting_PN = faultaddress;
-		//Here we set the user stack to be both readable and writable. 
-		permission_bit |= (PF_W | PF_R); //stack is readable,writable but not executable ! 
-
-	}
-
-	//If faultaddress is still not within any range of the region and stack, then we return error code.
-	if(faulting_PN == 0) //Note: Since the top 1 GB is used for kernel space, so the user stack won't not start with 0x00000000, but 0x80000000.
-	{
+	// TODO: don't check stack for now
+	/*if(!found){
+		vtop = USERSTACK;
+		vbase = vtop - VM_STACKPAGES * PAGE_SIZE; // TODO need to define VM_STACKPAGES later.... it should be a variable.
+		if(faultaddress >= vbase && faultaddress < vtop)
+		{
+			faulting_PN = faultaddress;
+			//Here we set the user stack to be both readable and writable. 
+			permission_bit |= (PF_W | PF_R); //stack is readable,writable but not executable ! 
+			return handle_vaddr_fault(faultaddress, paddr, permission_bit);
+		}
+	}*/
+	// cannot find the faulting address, probably a segfault
+	if(faulting_PN == 0){
+		splx(spl);
 		return EFAULT;
-	}
-
-	int err;
-	if (err = handle_vaddr_fault(faultaddress,paddr,permission_bit)) {
-		return err;
 	}
 }
 
@@ -426,31 +412,23 @@ vm_fault(int faulttype, vaddr_t faultaddress)
 	#define PHY_PAGENUM 0xfffff000 
 	// #define KVADDR_TO_PADDR(vaddr) ((vaddr)-MIPS_KSEG0)
 
-
-
-
-
 int handle_vaddr_fault (vaddr_t faultaddress, paddr_t paddr, unsigned int permission_bit) {
-	/* Once we found faultaddress falls into certan regions, then we do the masking to obtain level1_index and level2_index. 
-	Note that for 2-level page table: the top 10 bits are used as level1_index, and the immediate 10 bits are used as level2_index. And
-	the last 12 bits is the offset */
-	unsigned int level1_index, level2_index;
+	
 	vaddr_t vaddr;
 	paddr_t physical_PN;
 	u_int32_t ehi,elo;
 
-
-	level1_index = (faultaddress & FIRST_LEVEL_PN) >> 22; 
-	level2_index = (faultaddress & SEC_LEVEL_PN) >> 12;
+	int level1_index = (faultaddress & FIRST_LEVEL_PN) >> 22; 
+	int level2_index = (faultaddress & SEC_LEVEL_PN) >> 12;
 
 	struct as_pagetable *level2_pagetable = curthread->t_vmspace->as_master_pagetable[level1_index];
 
 	if(level2_pagetable != NULL) {
 		// If the second level page table exits,
-        // get the address stores in PTE, 
         // translate it into physical address, 
         // check writeable flag,
         // and prepare the physical address for TLBLO
+        // get the address stores in PTE, 
 		u_int32_t pte = level2_pagetable[level2_index];
 
 		if (pte & PTE_PRESENT) {
@@ -468,14 +446,13 @@ int handle_vaddr_fault (vaddr_t faultaddress, paddr_t paddr, unsigned int permis
         	// update the PTE of the second page table,
         	// check writeable flag,
 
-        	// and prepare the physical address for TLB
-			vaddr = alloc_kpages(1); //allocate a new page in 2nd page table. Upon this function call, there already exists a mapped 
-			//physical address.
+        /*	// and prepare the physical address for TLB
+			vaddr = alloc_kpages(1); 
 			assert(vaddr != 0);
-			as_zero_region(vaddr,1); //zero out the new page.
-			*second_level_PTE | = (vaddr | PTE_VALID); //set the VALID bit of the new page to 1, and assign second_level_PTE to this new 
-			//page's virtual address.
+			as_zero_region(vaddr,1); 
+			*second_level_PTE | = (vaddr | PTE_VALID); 
 			paddr = KVADDR_TO_PADDR(vaddr);
+*/
 
 			if (permission_bit & PF_W) {
 				// if we intend to write, we set the TLB dirty bit
@@ -483,7 +460,7 @@ int handle_vaddr_fault (vaddr_t faultaddress, paddr_t paddr, unsigned int permis
 			}
 		}
 	} else {
-		// If second page table doesn't exists, create second page table,
+		// If second page table doesn't exists, create second page table --> demand paging
 		level2_pagetable = kmalloc(sizeof(struct as_pagetable));
 	    // allocate a page and do the mapping,
 		paddr = alloc_kpages(1);
@@ -600,7 +577,7 @@ void swap_out(int frame_id, off_t pos) {
 
 /*
 	Loads a page to physical memory at the specified frame_id
-	@precondition: the physical page must be available for load
+	@precondition: the physical page must be free for loading
 */
 void load_page(int pid, vaddr_t vaddr, int frame_id) {
 	// go through the swap file mapping for the swapped page
