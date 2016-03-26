@@ -15,7 +15,7 @@
 extern struct thread* curthread;
 /*************** Structure representing the physical pages/frames in memory ***************/
 typedef struct frame {
-	// int pid;	// the process it belongs to
+	// int pid;	// the process it btlb_lowngs to
 	struct thread* owner_thread;
 	int frame_id;	// position in array
 	paddr_t frame_start; // the starting address of this page, needed for address translation
@@ -38,7 +38,7 @@ size_t num_fixed_page;
 /*********************************** Swap file *******************************************/
 struct vnode * swap_file;
 off_t cur_pos;
-struct bitmap* disk_map;
+struct bitmap* swapfile_map;
 #define MAX_SWAPFILE_SLOTS 16384 // TODO: we support upto 16384 pages on disk
  /**************************** Convenience Function **************************************/
 int swap_out(int frame_id);
@@ -57,7 +57,7 @@ void swapping_init(){
 		panic("vfs_open on swap_file failed");
 	}
 	cur_pos = 0;
-	disk_map = bitmap_create(MAX_SWAPFILE_SLOTS);
+	swapfile_map = bitmap_create(MAX_SWAPFILE_SLOTS);
 }
 
 paddr_t
@@ -93,7 +93,6 @@ vm_bootstrap(void)
 	/************************************** ALLOCATE SPACE *****************************************/
 	// first the coremap
 	start_adjusted = start + num_pages * sizeof(struct frame); 
-	// then the swap file
 	/************************************** initialize coremap *************************************/
 	int i = 0, fixed_pages, free_pages;
 	fixed_pages = (start_adjusted - start) / PAGE_SIZE;
@@ -158,7 +157,7 @@ u_int32_t* get_PTE(struct thread* addrspace_owner, vaddr_t va) {
 		** evict the page, should the page be clean,
 		or
 	 	** swap to disk, should the page be dirty
-	@return the id of the freed frame
+	@return the id of the evict/swapped frame
 	TODO: an optimization: find clean pages if possible.
 */
 int evict_or_swap(){
@@ -173,7 +172,7 @@ int evict_or_swap(){
 	// check the state of this page...
 	if (coremap[kicked_ass_page].frame_state == DIRTY) {
 		int disk_slot;
-		bitmap_alloc(disk_map, &disk_slot);
+		bitmap_alloc(swapfile_map, &disk_slot);
 		off_t disk_addr = disk_slot * PAGE_SIZE;
 		swap_out(kicked_ass_page, disk_addr);
 		return kicked_ass_page;
@@ -188,6 +187,38 @@ int evict_or_swap(){
 	return kicked_ass_page;
 }
 
+
+/*
+	Same as alloc_one_page, but sets the coremap entries as user space
+*/
+paddr_t alloc_page_userspace(vaddr_t va) {
+	assert(curspl > 0);
+	// passed in virtual address shall be page-aligned
+	assert();
+	int i = 0;
+	int kicked_ass_page = -1;
+	// go through the coremap check if there's a free page
+	for (; i < num_frames; i++) {
+		if (coremap[i].frame_state == FREE) {
+			kicked_ass_page = i;
+			break;
+		}
+	}
+	if (kicked_ass_page == -1) {
+		// no free page available right now --> we need to evict/swap a page
+		// this makes room for the newly created page
+		kicked_ass_page = evict_or_swap();
+	}
+	assert(kicked_ass_page >= 0);
+	// now do the allocation
+	coremap[kicked_ass_page].owner_thread = curthread;
+	coremap[kicked_ass_page].frame_state = DIRTY; 
+	coremap[kicked_ass_page].mapped_vaddr = va;
+	coremap[kicked_ass_page].num_pages_allocated = 1;
+	
+	return coremap[kicked_ass_page].frame_start;
+}
+
 /*
 	Allocates a single page
 	@return starting address of the newly allocated page
@@ -196,18 +227,20 @@ vaddr_t alloc_one_page() {
 	assert(curspl > 0);
 	int i = 0;
 	// go through the coremap check if there's a free page
+	int kicked_ass_page = -1;
+	// go through the coremap check if there's a free page
 	for (; i < num_frames; i++) {
 		if (coremap[i].frame_state == FREE) {
-			coremap[i].owner_thread = curthread;
-			coremap[i].frame_state = FIXED;
-			coremap[i].num_pages_allocated = 1; 
-			return PADDR_TO_KVADDR(coremap[i].frame_start);
+			kicked_ass_page = i;
+			break;
 		}
 	}
-
-	// no free page available right now --> we need to evict/swap a page
-	// this makes room for the newly created page
-	int kicked_ass_page = evict_or_swap();
+	if (kicked_ass_page == -1) {
+		// no free page available right now --> we need to evict/swap a page
+		// this makes room for the newly created page
+		kicked_ass_page = evict_or_swap();
+	}
+	assert(kicked_ass_page >= 0);
 	// now do the allocation
 	coremap[kicked_ass_page].owner_thread = curthread;
 	coremap[kicked_ass_page].frame_state = FIXED; // keep kernel pages in memory
@@ -230,7 +263,8 @@ void evict_or_swap_multiple(int starting_frame, size_t npages){
 
 		if (coremap[starting_frame + i].frame_state == DIRTY) {
 			int disk_slot;
-			bitmap_alloc(disk_map, &disk_slot);
+			// find a slot on disk that is not used
+			bitmap_alloc(swapfile_map, &disk_slot);
 			off_t disk_addr = disk_slot * PAGE_SIZE;
 			swap_out(starting_frame + i, disk_addr);
 		} else {
@@ -288,7 +322,6 @@ vaddr_t alloc_npages(int npages) {
 		} while (coremap[starting_frame].frame_state == FIXED 
 				|| coremap[starting_frame].frame_state == FREE);
 
-		// assert(coremap[starting_frame].frame_state == );
 		// sanity check
 		int i = 0;
 		for (; i < npages; i++) {
@@ -327,7 +360,7 @@ alloc_kpages(int npages)
 
 /*
 	Function to free a certain number of pages given *ONLY* the starting address of the page.
-	*** The given address is page aligned ***
+	*** The given address shall be page aligned ***
 	To know the number of pages to free here, we need to store information in the page structure
 	when we do the page allocation accordingly.
 */
@@ -379,7 +412,7 @@ vm_fault(int faulttype, vaddr_t faultaddress)
 	vaddr_t vbase1, vtop1, vbase2, vtop2, stackbase, stacktop;
 	paddr_t paddr;
 	int i;
-	u_int32_t ehi, elo;
+	u_int32_t tlb_hi, tlb_low;
 	struct addrspace *as;
 	int spl;
 
@@ -427,12 +460,12 @@ vm_fault(int faulttype, vaddr_t faultaddress)
 		// base addr should be page aligned
 		assert((cur->vbase & PAGE_FRAME) == cur->as_vbase);  
 
-		// find which region the faulting address belongs to
+		// find which region the faulting address btlb_lowngs to
 		if(faultaddress >= vbase && faultaddress < vtop){
 			// faulting_PN = faultaddress;
 			// permission_bit = cur->region_permis;
 			found = 1;
-			int err = handle_vaddr_fault(faultaddress, paddr, cur->region_permis); 
+			int err = handle_vaddr_fault(faultaddress, cur->region_permis); 
 			splx(spl);
 			return err;
 			/**********************************************************/
@@ -440,20 +473,19 @@ vm_fault(int faulttype, vaddr_t faultaddress)
 	}
 
 	//if we didn't fall into any region, we check if it falls into the user stack.
-	// TODO: don't check stack for now
-	/*if(!found){
+	if(!found){
 		vtop = USERSTACK;
-		vbase = vtop - VM_STACKPAGES * PAGE_SIZE; // TODO need to define VM_STACKPAGES later.... it should be a variable.
-		if(faultaddress >= vbase && faultaddress < vtop)
-		{
-			faulting_PN = faultaddress;
-			//Here we set the user stack to be both readable and writable. 
-			permission_bit |= (PF_W | PF_R); //stack is readable,writable but not executable ! 
-			return handle_vaddr_fault(faultaddress, paddr, permission_bit);
+		// hardcoded stack size
+		vbase = vtop - MAX_STACK_PAGES * PAGE_SIZE; 
+		if(faultaddress >= vbase && faultaddress < vtop){
+			found = 1
+			permission_bit |= (PF_W | PF_R); 
+			int err = handle_vaddr_fault(faultaddress, permission_bit);
+			return err;
 		}
-	}*/
+	}
 	// cannot find the faulting address, probably a segfault
-	if(faulting_PN == 0){
+	if(!found){
 		splx(spl);
 		return EFAULT;
 	}
@@ -461,16 +493,20 @@ vm_fault(int faulttype, vaddr_t faultaddress)
 
 	#define FIRST_LEVEL_PN 0xffc00000
 	#define SEC_LEVEL_PN 0x003fc000
-    #define PTE_VALID //TODO
 	#define PAGE_FRAME 0xfffff000	/* mask for getting page number from addr FIRST 20 bits*/
 	#define PHY_PAGENUM 0xfffff000 
-	// #define KVADDR_TO_PADDR(vaddr) ((vaddr)-MIPS_KSEG0)
+	#define INVALIDATE_PTE 0xfffff7ff
+	#define KVADDR_TO_PADDR(vaddr) ((vaddr)-MIPS_KSEG0)
 
-int handle_vaddr_fault (vaddr_t faultaddress, paddr_t paddr, unsigned int permission_bit) {
-	
+
+/*
+	Do the right right, since the faulting address has been validated
+*/
+int handle_vaddr_fault (vaddr_t faultaddress, unsigned int permission_bit) {
+
+	assert(curspl > 0);
 	vaddr_t vaddr;
-	paddr_t physical_PN;
-	u_int32_t ehi,elo;
+	paddr_t physical_PN, paddr;
 
 	int level1_index = (faultaddress & FIRST_LEVEL_PN) >> 22; 
 	int level2_index = (faultaddress & SEC_LEVEL_PN) >> 12;
@@ -487,7 +523,7 @@ int handle_vaddr_fault (vaddr_t faultaddress, paddr_t paddr, unsigned int permis
 
 		if (pte & PTE_PRESENT) {
 			// page is present in physical memory
-			physical_PN = pte & PHY_PAGENUM; // get the physical page number
+			physical_PN = pte & PHY_PAGENUM; 
 
 			if (prermission_bit & PF_W) {
 				// if we intend to write, we set the TLB dirty bit
@@ -495,19 +531,27 @@ int handle_vaddr_fault (vaddr_t faultaddress, paddr_t paddr, unsigned int permis
 			}
 
 		} else {
-			/* page not in physical memory */
-			// If not exists, do the mapping, 
-        	// update the PTE of the second page table,
-        	// check writeable flag,
-
         /*	// and prepare the physical address for TLB
 			vaddr = alloc_kpages(1); 
 			assert(vaddr != 0);
 			as_zero_region(vaddr,1); 
 			*second_level_PTE | = (vaddr | PTE_VALID); 
 			paddr = KVADDR_TO_PADDR(vaddr);
-*/
+		*/
 
+			// if page was swapped out, we bring it back to memory
+			int i = 0, found = 0;
+			for (; i < num_frames; i++) {
+				if (coremap[i].frame_state == FREE){
+					found = 1;
+					load_page(curthread, vaddr, i);
+					break;
+				}
+			}
+			if(!found) {
+				int free_frame = evict_or_swap();
+				load_page(curthread, faultaddress, free_frame);
+			}
 			if (permission_bit & PF_W) {
 				// if we intend to write, we set the TLB dirty bit
 				paddr |= TLBLO_DIRTY; //set DIRTY bit to 1. 
@@ -516,78 +560,47 @@ int handle_vaddr_fault (vaddr_t faultaddress, paddr_t paddr, unsigned int permis
 	} else {
 		// If second page table doesn't exists, create second page table --> demand paging
 		level2_pagetable = kmalloc(sizeof(struct as_pagetable));
-	    // allocate a page and do the mapping,
-		paddr = alloc_kpages(1);
-
+		// initialize the pagetable to invalid(equivalent to SWAPPED)
+		int i = 0;
+		for (; i < SECOND_LEVEL_PT_SIZE; i++) {
+			level2_pagetable[i] &= INVALIDATE_PTE;
+		}
+	    // allocate a page and do the mapping
+	    physical_PN = alloc_page_userspace(faultaddress);
+	    assert(physical_PN % PAGE_SIZE == 0);
 		
-	    // update the PTE,
+	    // update the PTE to present
+	    u_int32_t* pte = get_PTE(curthread, faultaddress); // this entry should not have been updated
+	    assert((*pte & PTE_PRESENT) == 0);
+	    *pte = (*pte | PTE_PRESENT);
 	    // and prepare the physical address.
-
-	    //Note: in both page tables, each entry stores virtual address, so each entry takes 4 bytes.
-
-	    //we allocate a new entry to first_level_PTE in level1, whic is used to point to the new level2 page table.
-		*first_level_PTE = alloc_kpages(1);
-		assert(*first_level_PTE != 0);
-		as_zero_region(*first_level_PTE,1); //zero out the new allocated page.
-
-		//let second_level_PTE point to the specified entry in level2 page table.
-		second_level_PTE = (vaddr_t *) (*first_level_PTE + level2_index*4);
-		//create a temporary vaddr pointer to point to an newly allocated viraddr which is used for the specified level2 page table entry
-		vaddr_t * temp = alloc_kpages(1);
-		assert(temp != 0);
-		as_zero_region(temp, 1);
-
-		//assign the newly allocated viraddr with VALID bit setting to 1 to second_level_PTE.
-		*second_level_PTE = (temp | PTE_VALID);
-
-		//now we set up the corresponding physical address for second_level_PTE.
-		paddr = KVADDR_TO_PADDR(temp);
+	    paddr = physical_PN;
 		if(permission_bit & PF_W){
-			paddr | = TLBLO_DIRTY; 
+			paddr |= TLBLO_DIRTY; 
 		}
 	}
 
-	/*once we are here, it means that we can guarantee that there exists physical address in page table for faultaddress.
-	Now we need to update the TLB entry. Since TLB is global, we need to disable interrupts to manipute it. */
-
-	/* Basic Idea:
-		 if there still a empty TLB entry, insert new one in
-    	if not, randomly select one, throw it, insert new one in */
-
-	/* Note: #define NUM_TLB  64
-		 TLB_Read: read a TLB entry out of the TLB into ENTRYHI and ENTRYLO. INDEX specifies which one to get.
- 	void TLB_Read(u_int32_t *entryhi, u_int32_t *entrylo, u_int32_t index); */
-
-	int spl = splhigh();
-
-	int k = 0;
+	/* once we are here, it means that we can guarantee that there exists PTE in page table for faultaddress.
+	Now we need to load the mapping to TLB */
 	
-	//we loop through the TLB, iterator k is used as the index in TLB list.
+	u_int32_t tlb_hi, tlb_low;
+	int k = 0;	
 	for(; k< NUM_TLB; k++){
-		//we read kth TLB entry out of the TLB into ENTRYHI and ENTRYLO, and check if this entry is valid. If so, we keep iterating,
-		TLB_Read(&ehi,&elo,k);
-		if(elo & TLBLO_VALID){
+		TLB_Read(&tlb_hi,&tlb_low,k);
+		// skip valid ones
+		if(tlb_low & TLBLO_VALID){
 			continue;
 		}
-
-		//recall: write the TLB entry specified by ENTRYHI and ENTRYLO
-		//void TLB_Write(u_int32_t entryhi, u_int32_t entrylo, u_int32_t index);
-
-		//once we find an empty entry, update it with ehi and elow.
-		ehi = faultaddress;
-		elo = paddr | TLBLO_VALID; // set the physical page frame 's  VALID bit to 1.
-		TLB_Write(ehi,elo,k);
-		splx(spl);
+		//once we find an empty entry, update it with tlb_hi and tlb_loww.
+		tlb_hi = faultaddress;
+		tlb_low = paddr | TLBLO_VALID; // set the physical page frame 's  VALID bit to 1.
+		TLB_Write(tlb_hi,tlb_low,k);
 		return 0;
 	}
-
-	//if we are here, meaning that the TLB is full, and we need to use replacement policy to kick one page out.
-
-	//dummy algorithm -----> randomly select a entry, and update it .
-	ehi = faultaddress;
-	elo = paddr | TLBLO_VALID;
-	TLB_Random(ehi,elo);
-	splx(spl);
+	// no invalid ones, so we randomly kicked out an entry
+	tlb_hi = faultaddress;
+	tlb_low = paddr | TLBLO_VALID;
+	TLB_Random(tlb_hi,tlb_low);
 	return 0;
 }
 
@@ -614,8 +627,10 @@ void as_zero_region(vaddr_t vaddr, size_t num_pages) {
 /*
 	Function to write a page to swap_file, and update the page table accordingly
 	@param frame_id, pos is the starting offset for the write operation
+	Note: the position has already 
 */
-void swap_out(int frame_id, off_t pos) {
+void swap_out( int frame_id, off_t pos) {
+	assert(curspl > 0);
 	struct uio u;
 	paddr_t dest = coremap[frame_id].frame_start;
 	// initialize the uio
@@ -625,19 +640,21 @@ void swap_out(int frame_id, off_t pos) {
 	if(result){
 		panic("write page to disk failed");
 	}
-	// TODO udpate the page table entry 
 	return;
 }
+
+#define SWAPFILE_OFFSET 0x000007FF
 
 /*
 	Loads a page to physical memory at the specified frame_id
 	@precondition: the physical page must be free for loading
 */
-void load_page(int pid, vaddr_t vaddr, int frame_id) {
+void load_page(struct thread* owner_thread, vaddr_t vaddr, int frame_id) {
 	// go through the swap file mapping for the swapped page
 
-
-	off_t pos; // pos of the page in the swap file
+	u_int32_t *pte = get_PTE(owner_thread, vaddr); 
+	assert(pte != NULL);
+	off_t pos = (*pte & SWAPFILE_OFFSET) * PAGE_SIZE; 
 	struct uio u;
 	paddr_t dest = coremap[frame_id].frame_start;
 	mk_kuio(&u, PADDR_TO_KVADDR(dest), PAGE_SIZE, pos, UIO_READ);

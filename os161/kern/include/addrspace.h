@@ -11,20 +11,22 @@ struct vnode;
 /*
 	PTE format:
 	|<----- 20 ----->|<--  1  -->|<---- 11 ---->|
-		frame #        present?     unused
+		frame #        present?     disk_slot
 	
 */
 #define PTE_PRESENT 0x00000800
 #define PTE_SWAPPED 0xfffff7ff
+
+/*************************************** 2nd level pagetable ************************************/
 struct as_pagetable{
 	u_int32_t PTE [SECOND_LEVEL_PT_SIZE];
 };
 
+/*************************************** User address space *************************************/
+#define MAX_STACK_PAGES 24
 /* 
  * Address space - data structure associated with the virtual memory
  * space of a process.
- *
- * You write this.
  */
  struct as_region{
  	vaddr_t vbase;
@@ -46,6 +48,8 @@ struct addrspace {
 	/* Put stuff here for your VM system */
 	// struct as_region *as_regions_start;    /* header of the regions linked list */
 	struct array* as_regions;
+	struct as_region stack;
+	struct as_region heap;
     // vaddr_t as_master_pagetable;        /* address of the first-level page table */
     struct as_pagetable *as_master_pagetable[FIRST_LEVEL_PT_SIZE]; // first level page table
 #endif
