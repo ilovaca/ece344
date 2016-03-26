@@ -69,15 +69,22 @@ as_destroy(struct addrspace *as)
 void
 as_activate(struct addrspace *as)
 {
-	/*
-	 * Write this.
-	 */
+	int i, spl;
 
-	(void)as;  // suppress warning until code gets written
+	(void)as;
+
+	spl = splhigh();
+
+	for (i=0; i<NUM_TLB; i++) {
+		TLB_Write(TLBHI_INVALID(i), TLBLO_INVALID(), i);
+	}
+
+	splx(spl);
+
 }
 
 /*
- * Set up a segment at virtual address VADDR of size MEMSIZE. The
+ * Set up a *segment* at virtual address VADDR of size MEMSIZE. The
  * segment in memory extends from VADDR up to (but not including)
  * VADDR+MEMSIZE.
  *
@@ -90,16 +97,25 @@ int
 as_define_region(struct addrspace *as, vaddr_t vaddr, size_t sz,
 		 int readable, int writeable, int executable)
 {
-	/*
-	 * Write this.
-	 */
+	size_t npages; 
 
-	(void)as;
-	(void)vaddr;
-	(void)sz;
+	/* Align the region. First, the base... */
+	//vaddr & ~PAGE_FRAME gives the offset
+	sz += vaddr & ~(vaddr_t)PAGE_FRAME;	
+	vaddr &= PAGE_FRAME;
+
+	/* ...and now the length. */
+	sz = (sz + PAGE_SIZE - 1) & PAGE_FRAME;
+	// sz must be page aligned
+	assert(sz % PAGE_SIZE == 0);
+
+	npages = sz / PAGE_SIZE;
+
+	/* We don't use these - all pages are read-write */
 	(void)readable;
 	(void)writeable;
 	(void)executable;
+
 	return EUNIMP;
 }
 
@@ -136,7 +152,7 @@ as_define_stack(struct addrspace *as, vaddr_t *stackptr)
 
 	/* Initial user-level stack pointer */
 	*stackptr = USERSTACK;
-	
+
 	return 0;
 }
 
