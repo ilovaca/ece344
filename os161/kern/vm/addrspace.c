@@ -24,15 +24,15 @@ as_create(void)
 	if (as == NULL) {
 		return NULL;
 	}
+	
+	// allocate the array of regions
+	as->regions = array_create();
 	// initiailize first level page table
 	int i = 0;
 	for (; i < FIRST_LEVEL_PT_SIZE; i++){
-		as_master_pagetable[i] = NULL;
+		as->as_master_pagetable[i] = NULL;
 	}
 
-	// for now we only allocate *ONE* 2nd level PT
-	as_master_pagetable[0] = kmalloc(sizeof(struct as_pagetable));
-	// allocate a page and then update it.
 	return as;
 }
 

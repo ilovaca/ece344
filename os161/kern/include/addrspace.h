@@ -46,11 +46,8 @@ struct addrspace {
 	paddr_t as_stackpbase;
 #else
 	/* Put stuff here for your VM system */
-	// struct as_region *as_regions_start;    /* header of the regions linked list */
 	struct array* as_regions;
-	struct as_region stack;
-	struct as_region heap;
-    // vaddr_t as_master_pagetable;        /* address of the first-level page table */
+	struct as_region heap; //TODO
     struct as_pagetable *as_master_pagetable[FIRST_LEVEL_PT_SIZE]; // first level page table
 #endif
 };
