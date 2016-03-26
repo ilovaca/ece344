@@ -27,12 +27,11 @@ typedef struct frame {
 enum frame_state {
 	FREE,
 	FIXED, // some critical pages shall remain on physical memory
-	ALLOCATED, // TODO: to be replaced by other states
-	DIRTY,
+	DIRTY, 
 	ClEAN,
 };
 
-/*********************************** The coremap *****************************************/
+/*********************************** The Coremap *****************************************/
 frame* coremap;
 size_t num_frames;
 size_t num_fixed_page;
@@ -48,6 +47,8 @@ int load_page(int pid, vaddr_t vaddr);
 
 u_int32_t* get_PTE (struct thread*, vaddr_t va);
 /*****************************************************************************************/
+int vm_bootstraped = 0;
+/*****************************************************************************************/
 
 void swapping_init(){
 	// for swapping subsystem
@@ -57,6 +58,20 @@ void swapping_init(){
 	}
 	cur_pos = 0;
 	disk_map = bitmap_create(MAX_SWAPFILE_SLOTS);
+}
+
+paddr_t
+getppages(unsigned long npages)
+{
+	int spl;
+	paddr_t addr;
+
+	spl = splhigh();
+
+	addr = ram_stealmem(npages);
+	
+	splx(spl);
+	return addr;
 }
 
 
@@ -116,6 +131,7 @@ vm_bootstrap(void)
 	num_fixed_page = fixed_pages;
 	/**************************************** END of init ******************************************/
 	// TODO: we may want to set some flags to indicate that vm has already bootstrapped, 
+	vm_bootstraped = 1;
 }
 
 
@@ -150,7 +166,8 @@ int evict_or_swap(){
 	int kicked_ass_page;
 	do{
 		kicked_ass_page = random() % num_frames;
-	} while (coremap[kicked_ass_page].frame_state != ALLOCATED);
+	} while (coremap[kicked_ass_page].frame_state == FIXED 
+				|| coremap[kicked_ass_page].frame_state == FREE);
 
 	/* TODO need to swap the page to disk and update the PTE */
 	// check the state of this page...
@@ -182,21 +199,50 @@ vaddr_t alloc_one_page() {
 	for (; i < num_frames; i++) {
 		if (coremap[i].frame_state == FREE) {
 			coremap[i].owner_thread = curthread;
-			coremap[i].frame_state = ALLOCATED;
+			coremap[i].frame_state = FIXED;
 			coremap[i].num_pages_allocated = 1; 
 			return PADDR_TO_KVADDR(coremap[i].frame_start);
 		}
 	}
 
 	// no free page available right now --> we need to evict/swap a page
+	// this makes room for the newly created page
 	int kicked_ass_page = evict_or_swap();
 	// now do the allocation
 	coremap[kicked_ass_page].owner_thread = curthread;
-	coremap[kicked_ass_page].frame_state = ALLOCATED;
+	coremap[kicked_ass_page].frame_state = FIXED; // keep kernel pages in memory
+	// if this is invoked by kmalloc, then the virtual address must be mapped by PADDR_TO_KVADDR
 	coremap[kicked_ass_page].mapped_vaddr = PADDR_TO_KVADDR(coremap[kicked_ass_page].frame_start);
 	coremap[kicked_ass_page].num_pages_allocated = 1;
-	// return the physical page number 
+	
 	return (coremap[kicked_ass_page].mapped_vaddr);
+}
+
+/*
+	Function to evict or swap multiple pages starting from starting_frame
+*/
+void evict_or_swap_multiple(int starting_frame, size_t npages){
+	
+	for (i = 0; i < npages; i++) {
+		// come on, don't let me down...
+		assert(coremap[starting_frame + i].frame_state != FREE);
+		assert(coremap[starting_frame + i].frame_state != FIXED);
+
+		if (coremap[starting_frame + i].frame_state == DIRTY) {
+			int disk_slot;
+			bitmap_alloc(disk_map, &disk_slot);
+			off_t disk_addr = disk_slot * PAGE_SIZE;
+			swap_out(starting_frame + i, disk_addr);
+		} else {
+		// page clean, no need for swap, just update the PTE and return
+		}
+		// update PTE of the *swapped* page and return frame id for loading/allocation
+		u_int32_t *pte = get_PTE(coremap[starting_frame + i].owner_thread,
+								 coremap[starting_frame + i].mapped_vaddr);
+		// set the swapped bit (PRESENT BIT = 0)
+		*pte = (*pte & PTE_SWAPPED);	 
+	}
+	return;
 }
 
 /*
@@ -223,40 +269,42 @@ vaddr_t alloc_npages(int npages) {
 		for (; j > i - npages; j--)
 		{
 			coremap[j].owner_thread = curthread;
-			coremap[j].frame_state = ALLOCATED;
+			coremap[j].frame_state = FIXED;
 			// redundancy not a problem ;)
+			coremap[j].mapped_vaddr = PADDR_TO_KVADDR(coremap[j].frame_start);
 			coremap[j].num_pages_allocated = npages; 
 		}
+		assert(coremap[j].mapped_vaddr == PADDR_TO_KVADDR(coremap[j].frame_start));
 		return PADDR_TO_KVADDR(coremap[j].frame_start);
 
 	} else {
 		// not found, we evict n pages starting from a random page
 		// make sure the n pages does not overflow the end of memory
 		// 		--> search the first num_frames - npages, excluding the fixed pages
-		int kicked_ass_page;
+		int starting_frame;
 		int search_range = num_frames - npages - num_fixed_page;
 		do{
-			kicked_ass_page = (random() % search_range) + num_fixed_page;
-		} while (coremap[kicked_ass_page].frame_state != ALLOCATED);
+			starting_frame = (random() % search_range) + num_fixed_page;
+		} while (coremap[starting_frame].frame_state == FIXED 
+				|| coremap[starting_frame].frame_state == FREE);
 
-		assert(coremap[kicked_ass_page].frame_state == ALLOCATED);
+		// assert(coremap[starting_frame].frame_state == );
 		// sanity check
 		int i = 0;
 		for (; i < npages; i++) {
-			if (coremap[i + kicked_ass_page].frame_state == FIXED) panic("alloc_npages contains a fixed page"); 
+			if (coremap[i + starting_frame].frame_state == FIXED) 
+				panic("alloc_npages contains a fixed page"); 
 		}
-		// evict/swap to disk
+		// evict/swap all pages to disk
+		evict_or_swap_multiple(starting_frame, npages);
+		// allocation
 		for (i = 0; i < npages; i++) {
-			/*
-	
-			 TODO: swap to disk 
-
-			*/
-			coremap[kicked_ass_page + i].owner_thread = curthread;
-			coremap[kicked_ass_page + i].frame_state = ALLOCATED;
-			coremap[kicked_ass_page + i].num_pages_allocated = npages; 
+			coremap[starting_frame + i].owner_thread = curthread;
+			coremap[starting_frame + i].frame_state = FIXED;
+			coremap[starting_frame + i].mapped_vaddr = PADDR_TO_KVADDR(coremap[starting_frame + i].frame_start);
+			coremap[starting_frame + i].num_pages_allocated = npages; 
 		}
-		return PADDR_TO_KVADDR(coremap[kicked_ass_page].frame_start);
+		return PADDR_TO_KVADDR(coremap[starting_frame].frame_start);
 	}
 }
 
@@ -266,9 +314,15 @@ vaddr_t
 alloc_kpages(int npages)
 {	
 	int spl = splhigh();
-	vaddr_t ret = (npages == 1) ? alloc_one_page() : alloc_npages(npages);
-	splx(spl);
-	return ret; 
+	if(vm_bootstraped == 0){
+		addr = getppages(npages);
+		splx(spl);
+		return PADDR_TO_KVADDR(addr);
+	} else {
+		vaddr_t	ret = (npages == 1) ? alloc_one_page() : alloc_npages(npages);
+		splx(spl);
+		return ret; 
+	}
 }
 
 /*
