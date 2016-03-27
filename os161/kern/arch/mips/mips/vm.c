@@ -446,7 +446,7 @@ vm_fault(int faulttype, vaddr_t faultaddress)
 
 	// as_region cur = as->as_regions_start;
 	vaddr_t faulting_PN = 0;
-	unsigned int permission_bit = 0;
+	unsigned int permissions = 0;
 	vaddr_t vbase, vtop;
 	//Go through the array of regions to check which region does this faultaddress fall into. Note that those regions don't include user stack!
 
@@ -462,8 +462,6 @@ vm_fault(int faulttype, vaddr_t faultaddress)
 
 		// find which region the faulting address btlb_lowngs to
 		if(faultaddress >= vbase && faultaddress < vtop){
-			// faulting_PN = faultaddress;
-			// permission_bit = cur->region_permis;
 			found = 1;
 			int err = handle_vaddr_fault(faultaddress, cur->region_permis); 
 			splx(spl);
@@ -479,8 +477,8 @@ vm_fault(int faulttype, vaddr_t faultaddress)
 		vbase = vtop - MAX_STACK_PAGES * PAGE_SIZE; 
 		if(faultaddress >= vbase && faultaddress < vtop){
 			found = 1
-			permission_bit |= (PF_W | PF_R); 
-			int err = handle_vaddr_fault(faultaddress, permission_bit);
+			permissions |= (PF_W | PF_R); 
+			int err = handle_vaddr_fault(faultaddress, permissions);
 			return err;
 		}
 	}
@@ -502,7 +500,7 @@ vm_fault(int faulttype, vaddr_t faultaddress)
 /*
 	Do the right right, since the faulting address has been validated
 */
-int handle_vaddr_fault (vaddr_t faultaddress, unsigned int permission_bit) {
+int handle_vaddr_fault (vaddr_t faultaddress, unsigned int permissions) {
 
 	assert(curspl > 0);
 	vaddr_t vaddr;
@@ -525,8 +523,8 @@ int handle_vaddr_fault (vaddr_t faultaddress, unsigned int permission_bit) {
 			// page is present in physical memory
 			physical_PN = pte & PHY_PAGENUM; 
 
-			if (prermission_bit & PF_W) {
-				// if we intend to write, we set the TLB dirty bit
+			if (permissions & PF_W) {
+				// if we have permission to write, we set the TLB dirty bit
 				paddr |= TLBLO_DIRTY; //set DIRTY bit to 1. 
 			}
 
@@ -552,7 +550,7 @@ int handle_vaddr_fault (vaddr_t faultaddress, unsigned int permission_bit) {
 				int free_frame = evict_or_swap();
 				load_page(curthread, faultaddress, free_frame);
 			}
-			if (permission_bit & PF_W) {
+			if (permissions & PF_W) {
 				// if we intend to write, we set the TLB dirty bit
 				paddr |= TLBLO_DIRTY; //set DIRTY bit to 1. 
 			}
@@ -575,7 +573,7 @@ int handle_vaddr_fault (vaddr_t faultaddress, unsigned int permission_bit) {
 	    *pte = (*pte | PTE_PRESENT);
 	    // and prepare the physical address.
 	    paddr = physical_PN;
-		if(permission_bit & PF_W){
+		if(permissions & PF_W){
 			paddr |= TLBLO_DIRTY; 
 		}
 	}

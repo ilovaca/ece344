@@ -10,7 +10,8 @@
  * used. The cheesy hack versions in dumbvm.c are used instead.
  */
 
-
+extern size_t num_frames;
+extern frame* coremap;
 
 /*
 	in as_create, we just allocate a addrspace structure using kmalloc, and allocate a physical 
@@ -27,6 +28,9 @@ as_create(void)
 	
 	// allocate the array of regions
 	as->regions = array_create();
+	if (as->as_regions == NULL) {
+		return NULL;
+	}
 	// initiailize first level page table
 	int i = 0;
 	for (; i < FIRST_LEVEL_PT_SIZE; i++){
@@ -46,24 +50,50 @@ as_copy(struct addrspace *old, struct addrspace **ret)
 		return ENOMEM;
 	}
 
-	/*
-	 * Write this.
-	 */
-
 	(void)old;
 	
 	*ret = newas;
 	return 0;
 }
 
+
+/*
+	destroy all pages in physical memory and all swapped pages
+*/
 void
 as_destroy(struct addrspace *as)
 {
-	/*
-	 * Clean up as needed.
-	 */
-	
+	int spl = splhigh();
+	int i = 0;
+	// free all coremap entries
+	for (; i < num_frames; i++) {
+		if(coremap[i].owner_thread->t_vmspace == as){
+			coremap[i].owner_thread = NULL;
+			coremap[i].mapped_vaddr = 0xdeadbeef;
+			coremap[i].state = FREE;
+			coremap[i].num_pages_allocated = 0;
+		}
+	}
+	// free all pages in swap file
+	for(; i < array_getnum(as->as_regions); i++) {
+		struct as_region* cur = (struct as_region*)array_getguy(as->as_regions);
+		assert(cur->vbase % PAGE_SIZE == 0);
+		// destroy all pages within this region
+		int j = cur->npages;
+		for (; j < npages; j++) {
+
+		}
+	}	
+
+	array_destroy(as->as_regions);
+	// free 2nd level page tables
+	for(i = 0; i < SECOND_LEVEL_PT_SIZE; i++) {
+		if(as->as_master_pagetable[i] != NULL)
+			kfree(as->as_master_pagetable[i]);
+	}
 	kfree(as);
+	splx(spl);
+	return;
 }
 
 void
@@ -80,7 +110,6 @@ as_activate(struct addrspace *as)
 	}
 
 	splx(spl);
-
 }
 
 /*
@@ -100,21 +129,22 @@ as_define_region(struct addrspace *as, vaddr_t vaddr, size_t sz,
 	size_t npages; 
 
 	/* Align the region. First, the base... */
-	//vaddr & ~PAGE_FRAME gives the offset
-	sz += vaddr & ~(vaddr_t)PAGE_FRAME;	
+	assert((vaddr & PAGE_FRAME) == vaddr);
+	sz += vaddr & ~(vaddr_t)PAGE_FRAME;	 
 	vaddr &= PAGE_FRAME;
 
 	/* ...and now the length. */
 	sz = (sz + PAGE_SIZE - 1) & PAGE_FRAME;
 	// sz must be page aligned
 	assert(sz % PAGE_SIZE == 0);
-
 	npages = sz / PAGE_SIZE;
 
-	/* We don't use these - all pages are read-write */
-	(void)readable;
-	(void)writeable;
-	(void)executable;
+	// create and insert the region 
+	struct as_region *new_region = kmalloc(sizeof(struct as_region));
+	new_region->vbase = vaddr;
+	new_region->npages = npages;
+	new_region->region_permis = (readable | writeable | executable);
+	array_add(as->as_regions, new_region);
 
 	return EUNIMP;
 }

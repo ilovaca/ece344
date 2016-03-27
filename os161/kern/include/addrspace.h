@@ -11,8 +11,8 @@ struct vnode;
 /*
 	PTE format:
 	|<----- 20 ----->|<--  1  -->|<---- 11 ---->|
-		frame #        present?     disk_slot
-	
+		frame #        present?     permission bits
+	  or disk addr
 */
 #define PTE_PRESENT 0x00000800
 #define PTE_SWAPPED 0xfffff7ff
