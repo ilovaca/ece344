@@ -10,12 +10,12 @@ struct vnode;
 
 /*
 	PTE format:
-	|<----- 20 ----->|<--  1  -->|<---- 11 ---->|
-		frame #        present?     permission bits
+	|<----- 20 ----->|<--  1  -->|<--- 1 --->|<---- 10 ---->|
+		frame #        present?     swapped?  permission R/W/X
 	  or disk addr
 */
 #define PTE_PRESENT 0x00000800
-#define PTE_SWAPPED 0xfffff7ff
+#define PTE_SWAPPED 0x00000400
 
 /*************************************** 2nd level pagetable ************************************/
 struct as_pagetable{
@@ -24,6 +24,7 @@ struct as_pagetable{
 
 /*************************************** User address space *************************************/
 #define MAX_STACK_PAGES 24
+
 /* 
  * Address space - data structure associated with the virtual memory
  * space of a process.
@@ -32,8 +33,7 @@ struct as_pagetable{
  	vaddr_t vbase;
  	size_t npages;
  	unsigned int region_permis;
- 	// struct as_region *as_next_section;
- };
+};
 
 struct addrspace {
 #if OPT_DUMBVM

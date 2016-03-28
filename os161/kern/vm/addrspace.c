@@ -12,6 +12,7 @@
 
 extern size_t num_frames;
 extern frame* coremap;
+extern struct bitmap* swapfile_map;
 
 /*
 	in as_create, we just allocate a addrspace structure using kmalloc, and allocate a physical 
@@ -40,6 +41,12 @@ as_create(void)
 	return as;
 }
 
+/*
+	Two things to copy:
+		1. all pages present in physical memory
+		2. all pages in swap file
+	Note: do deep copy
+*/
 int
 as_copy(struct addrspace *old, struct addrspace **ret)
 {
@@ -50,8 +57,25 @@ as_copy(struct addrspace *old, struct addrspace **ret)
 		return ENOMEM;
 	}
 
-	(void)old;
-	
+	/******************** copy internal fields ***************/
+	// first all regions
+	int i;
+	for (i = 0; i < array_getnum(old->as_regions); i++) {
+		struct as_region* temp = kmalloc(sizeof(struct as_region));
+		*temp = *(array_getguy(old->as_regions, i));
+		array_add(newas->as_regions, temp);
+	}
+	// then both the first and second page table
+	for (i = 0; i < FIRST_LEVEL_PT_SIZE; i++) {
+		struct as_pagetable* dest = (struct as_pagetable*)kmalloc(sizeof(struct as_pagetable));
+		struct as_pagetable* src = old->as_master_pagetable[i];
+		int j;
+		// copy all ptes
+		for (j = 0; j < SECOND_LEVEL_PT_SIZE; j++){
+			dest->PTE[j] = src->PTE[j];
+		}
+		newas->as_master_pagetable[i] = dest;
+	}
 	*ret = newas;
 	return 0;
 }
@@ -69,22 +93,31 @@ as_destroy(struct addrspace *as)
 	for (; i < num_frames; i++) {
 		if(coremap[i].owner_thread->t_vmspace == as){
 			coremap[i].owner_thread = NULL;
-			coremap[i].mapped_vaddr = 0xdeadbeef;
+			coremap[i].mapped_vaddr = 0;
 			coremap[i].state = FREE;
 			coremap[i].num_pages_allocated = 0;
 		}
 	}
-	// free all pages in swap file
+	// free all pages in the swap file
 	for(; i < array_getnum(as->as_regions); i++) {
 		struct as_region* cur = (struct as_region*)array_getguy(as->as_regions);
 		assert(cur->vbase % PAGE_SIZE == 0);
-		// destroy all pages within this region
-		int j = cur->npages;
-		for (; j < npages; j++) {
-
+		// destroy all pages belonging to this region
+		int j = 0;
+		for (; j < cur->npages; j++) {
+			vaddr_t page = cur->vbase + j * PAGE_SIZE;
+			assert((page & PAGE_FRAME) == page);
+			u_int32_t *pte = get_PTE_from_addrspace(as, page);
+			if ((*pte & PTE_PRESENT == 0) && (*pte | PTE_SWAPPED != 0)) {
+				// if this page is in swap file...
+				off_t file_slot = (*pte & SWAPFILE_OFFSET) >> 12;
+				// the occupied bit must be set
+				assert(bitmap_isset(swapfile_map, file_slot) != 0);
+				bitmap_unmark(swapfile_map, file_slot);
+			}
 		}
 	}	
-
+	// free regions
 	array_destroy(as->as_regions);
 	// free 2nd level page tables
 	for(i = 0; i < SECOND_LEVEL_PT_SIZE; i++) {
@@ -143,8 +176,19 @@ as_define_region(struct addrspace *as, vaddr_t vaddr, size_t sz,
 	struct as_region *new_region = kmalloc(sizeof(struct as_region));
 	new_region->vbase = vaddr;
 	new_region->npages = npages;
+	// the region permission is the lower 3 bits R|W|X
 	new_region->region_permis = (readable | writeable | executable);
 	array_add(as->as_regions, new_region);
+
+	// High calibre style alert! after the user bss segment is defined,
+	// we know the start(vbase) of the user heap
+	if(array_getnum(as->as_regions) == 2){
+		// fuck... this is horribly inelegant, gotta find a better way
+		// to do this
+		as->heap.vbase = vaddr + npages * PAGE_SIZE + 1;
+		as->heap.npages = 0; // heap is empty at start, to be increased 
+							 // by the sbrk()
+	}
 
 	return EUNIMP;
 }
