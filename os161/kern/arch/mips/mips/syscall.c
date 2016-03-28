@@ -478,3 +478,19 @@ int sys_execv(struct trapframe* tf){
 
 }*/
 
+
+int sys_sbrk(int increment, int32_t* retval) {
+	// increment can be negative
+	struct addrspace* as = curthread->t_vmspace;
+	vaddr_t heap_base = as->heap.vbase;
+	vaddr_t heap_top = heap_base + as->heap.npages * PAGE_SIZE;
+	if (heap_top + increment < heap_base) {
+		// increment too negative... falling off the cliff
+		return EINVAL;
+	}
+	ROUNDUP(increment, sizeof(void*));
+	// TODO: the increment should be of page granularity? 
+	as->heap_end;
+	*retval = heap_end;
+	return 0;
+}

@@ -43,7 +43,7 @@ struct bitmap* swapfile_map;
 							in the first 20 bits (replacing the physical page numebr)*/
 
  /**************************** Convenience Function **************************************/
-int swap_out(int frame_id);
+int swap_out(int frame_id, off_t pos);
 
 int load_page(int pid, vaddr_t vaddr);
 
@@ -516,7 +516,7 @@ vm_fault(int faulttype, vaddr_t faultaddress)
 	#define PHY_PAGENUM 0xfffff000  /* Redundancy here :) */
 	#define INVALIDATE_PTE 0xfffff3ff  /* invalidate PTE by setting PRESENT and SWAPPED bits to zero */
 	#define KVADDR_TO_PADDR(vaddr) ((vaddr)-MIPS_KSEG0) // not used for now
-
+	#define CLEAR_PAGE_FRAME 0x00000fff
 
 /*
 	Do the right right, since the faulting address has been validated
@@ -539,6 +539,7 @@ int handle_vaddr_fault (vaddr_t faultaddress, unsigned int permissions) {
 		if (pte & PTE_PRESENT) {
 			// page is present in physical memory, meaning this is merely a TLB miss,
 			// so we just load the mapping into TLB
+			assert((pte & PAGE_FRAME) != 0xdeadb);
 			paddr = pte & PHY_PAGENUM; 
 
 			if (permissions & PF_W) {
@@ -574,6 +575,11 @@ int handle_vaddr_fault (vaddr_t faultaddress, unsigned int permissions) {
 			    level2_pagetable[level2_index] |= PTE_PRESENT;
 			}
 			// once we're here, we have a valid pte and physical page in mem
+			// so far we've got the desired page in memory
+			// now udpate the PTE with the physical frame number and PRESENT bit
+			*pte = (*pte & CLEAR_PAGE_FRAME);
+			*pte = (*pte | paddr);
+	    	*pte = (*pte | PTE_PRESENT);
 			assert((paddr & PAGE_FRAME) == paddr);
 			if (permissions & PF_W) {
 				// if we intend to write, we set the TLB dirty bit
@@ -597,6 +603,7 @@ int handle_vaddr_fault (vaddr_t faultaddress, unsigned int permissions) {
 	    u_int32_t* pte = get_PTE(curthread, faultaddress); 
 	    assert((*pte & PTE_PRESENT) == 0);
 	    *pte = (*pte | PTE_PRESENT);
+	    assert(*pte == level2_pagetable[level2_index]);
 	    // and prepare the physical address for loading the TLB
 	    paddr = physical_PN;
 		if(permissions & PF_W){
@@ -681,4 +688,41 @@ void load_page(struct thread* owner_thread, vaddr_t vaddr, int frame_id) {
 		panic("load page from disk failed");
 	}
 	return;
+}
+
+
+/*
+	A demon thread that periodically evicts the dirty pages
+	i.e. mark the physical pages as CLEAN
+*/
+void background_paging(void * args, unsigned int argc) {
+	(void) args;
+	(void) args;
+	int spl = splhigh();
+	int i = 0;
+	for (; i < num_frames; i++) {
+		if(coremap[i].frame_state == DIRTY) {
+			// if this page already has a copy in swapfile, we update it
+			vaddr_t va = coremap[i].mapped_vaddr;
+			assert(va != 0xDEADBEEF);
+			u_int32_t *pte = get_PTE();
+			assert(pte != NULL); // 2nd level page table does not exist? u f**king kidding me right?
+			assert((*pte & PTE_PRESENT) != 0); // come on, you must be present
+			int disk_slot = 0;
+			off_t disk_addr = 0;
+			if (*pte & PTE_SWAPPED) {
+				// if this page was ever swapped to the disk... 
+				// shit, need to find it. the PTE does not have the  
+
+			} else {
+				// otherwise, we find a new slot in swapfile and do the swapping
+				bitmap_alloc(swapfile_map, &disk_slot);
+				disk_addr = disk_slot * PAGE_SIZE;
+			}
+			swap_out(i, disk_addr);
+		}
+	}
+
+
+	splx(spl);
 }
