@@ -192,7 +192,7 @@ as_define_region(struct addrspace *as, vaddr_t vaddr, size_t sz,
 		// to do this
 		as->heap_start = vaddr + npages * PAGE_SIZE + 1;
 		as->heap_end = as->heap_start; // heap is empty at start, to be increased 
-							 // by the sbrk()
+									   // by the sbrk()
 	}
 
 	return EUNIMP;

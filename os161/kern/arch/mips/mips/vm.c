@@ -470,8 +470,7 @@ vm_fault(int faulttype, vaddr_t faultaddress)
 		if(faultaddress >= vbase && faultaddress < vtop){
 			found = 1;
 			// get the permission of the region
-			
-			permissions |= (cur->region_permis);
+			permissions = (cur->region_permis);
 			int err = handle_vaddr_fault(faultaddress, cur->region_permis); 
 			splx(spl);
 			return err;
