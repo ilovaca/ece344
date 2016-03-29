@@ -26,4 +26,22 @@ int vm_fault(int faulttype, vaddr_t faultaddress);
 vaddr_t alloc_kpages(int npages);
 void free_kpages(vaddr_t addr);
 
+/************************************************************************************/
+#define FIRST_LEVEL_PN 0xffc00000 /* mask to get the 1st-level pagetable index from vaddr (first 10 bits) */
+#define SEC_LEVEL_PN 0x003fc000	/* mask to get the 2nd-level pagetable index from vaddr (mid 10 bits) */
+#define PAGE_FRAME 0xfffff000	/* mask to get the page number from vaddr (first 20 bits) */
+#define PHY_PAGENUM 0xfffff000  /* Redundancy here :) */
+#define INVALIDATE_PTE 0xfffff3ff  /* invalidate PTE by setting PRESENT and SWAPPED bits to zero */
+#define CLEAR_PAGE_FRAME 0x00000fff
+
+
+u_int32_t* get_PTE(struct thread* addrspace_owner, vaddr_t va);
+
+u_int32_t* get_PTE_from_addrspace (struct addrspace* as, vaddr_t va);
+
+int evict_or_swap();
+
+void swap_out(int frame_id, off_t pos);
+
+void load_page(struct thread* owner_thread, vaddr_t vaddr, int frame_id);
 #endif /* _VM_H_ */
