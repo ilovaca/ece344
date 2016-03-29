@@ -181,6 +181,7 @@ as_define_region(struct addrspace *as, vaddr_t vaddr, size_t sz,
 	new_region->vbase = vaddr;
 	new_region->npages = npages;
 	// the region permission is the lower 3 bits R|W|X
+	new_region->region_permis = 0;
 	new_region->region_permis = (readable | writeable | executable);
 	array_add(as->as_regions, new_region);
 

@@ -15,7 +15,7 @@
 extern struct thread* curthread;
 /*************** Structure representing the physical pages/frames in memory ***************/
 typedef struct frame {
-	struct thread* owner_thread; // could be the addrspace object 
+	struct thread* owner_thread; // could be the addrspace object as well
 	int frame_id;	// position in coremap
 	paddr_t frame_start; // the starting physical address of this page, needed for address translation
 	vaddr_t mapped_vaddr; // the virtual address this frame is mapped to
@@ -24,8 +24,8 @@ typedef struct frame {
 } frame;
 
 enum frame_state {
-	FREE,  // ni dong de
-	FIXED, // kernel pages shall remain in physical memory, so does coremap
+	FREE,  // 
+	FIXED, // kernel pages shall remain in physical memory, so does coremap itself
 	DIRTY, // newly allocated user pages shall be dirty
 	ClEAN, // never modified since swapped in
 };
@@ -88,9 +88,10 @@ vm_bootstrap(void)
 	// get the amount of physical memory
 	ram_getsize(&start, &end);
 	// align start
-	start += start - start % PAGE_SIZE;
+	// start += start - start % PAGE_SIZE;
+	start = ROUNDUP(start, PAGE_SIZE);
 	// TODO: THIS ALIGNMENT IS PROBABLY NOT RIGHT
-	num_pages = (end - start/ PAGE_SIZE);
+	num_pages = ((end - start)/ PAGE_SIZE);
 	kprintf("start: %x, end: %x\n", start, end);
 	// kernel always looks at the virtual memory only
 	coremap = (frame *)PADDR_TO_KVADDR(start);
@@ -102,12 +103,11 @@ vm_bootstrap(void)
 	fixed_pages = (start_adjusted - start) / PAGE_SIZE;
 	// mark the pages in [start, start_adjusted] as fixed
 	for (; i < fixed_pages; i++) { 
-		// coremap[i].pid = -1;
 		coremap[i].owner_thread = curthread;
 		coremap[i].frame_id = i;
 		coremap[i].frame_start = start + PAGE_SIZE * i;
-		// the fixed pages are mapped to kernel addr space
 		coremap[i].mapped_vaddr = PADDR_TO_KVADDR(coremap[i].frame_start);
+		// the fixed pages are mapped to kernel addr space
 		coremap[i].frame_state = FIXED;
 		coremap[i].num_pages_allocated = 0;
 	}
@@ -294,7 +294,7 @@ void evict_or_swap_multiple(int starting_frame, size_t npages){
 */
 vaddr_t alloc_npages(int npages) {
 	assert(curspl > 0);
-	int num_continous = 0;
+	int num_continous = 1;
 	int i = 0; 
 	// find if there're npages in succession
 	for (; i < num_frames - 1; i++){
@@ -303,10 +303,9 @@ vaddr_t alloc_npages(int npages) {
 		if (coremap[i].frame_state == FREE && coremap[i + 1].frame_state == FREE) {
 			num_continous++;
 		} else {
-			num_continous = 0;
+			num_continous = 1;
 		}
 	}
-	assert(num_continous == npages);
 	if (num_continous >= npages) {
 		// found n continous free pages
 		int j = i;
@@ -329,8 +328,7 @@ vaddr_t alloc_npages(int npages) {
 		int search_range = num_frames - npages - num_fixed_page;
 		do{
 			starting_frame = (random() % search_range) + num_fixed_page;
-		} while (coremap[starting_frame].frame_state == FIXED 
-				|| coremap[starting_frame].frame_state == FREE);
+		} while (coremap[starting_frame].frame_state != FIXED);
 
 		// sanity check
 		int i = 0;
@@ -454,12 +452,10 @@ vm_fault(int faulttype, vaddr_t faultaddress)
 		return EFAULT;
 	}
 
-	// as_region cur = as->as_regions_start;
 	vaddr_t faulting_PN = 0;
 	unsigned int permissions = 0;
 	vaddr_t vbase, vtop;
-	//Go through the array of regions to check which region does this faultaddress fall into. Note that those regions don't include user stack!
-
+	/*********************************** Check the validity of the faulting address ******************************/
 	int i = 0;
 	int found = 0;
 	for (; i < array_getnum(as->as_regions); i++) {
@@ -473,10 +469,12 @@ vm_fault(int faulttype, vaddr_t faultaddress)
 		// find which region the faulting address btlb_lowngs to
 		if(faultaddress >= vbase && faultaddress < vtop){
 			found = 1;
+			// get the permission of the region
+			
+			permissions |= (cur->region_permis);
 			int err = handle_vaddr_fault(faultaddress, cur->region_permis); 
 			splx(spl);
 			return err;
-			/**********************************************************/
 		}
 	}
 
@@ -488,6 +486,7 @@ vm_fault(int faulttype, vaddr_t faultaddress)
 		if(faultaddress >= vbase && faultaddress < vtop){
 			found = 1;
 			permissions |= (PF_W | PF_R); 
+			splx(spl);
 			int err = handle_vaddr_fault(faultaddress, permissions);
 			return err;
 		}
@@ -498,8 +497,10 @@ vm_fault(int faulttype, vaddr_t faultaddress)
 		vtop = vbase + as->heap.npages * PAGE_SIZE;
 		if(faultaddress >= vbase && faultaddress < vtop){
 			found = 1;
+			// heap region is read/write of course
 			permissions |= (PF_W | PF_R); 
 			int err = handle_vaddr_fault(faultaddress, permissions);
+			splx(spl);
 			return err;
 		}
 	}
@@ -617,7 +618,7 @@ int handle_vaddr_fault (vaddr_t faultaddress, unsigned int permissions) {
 	u_int32_t tlb_hi, tlb_low;
 	int k = 0;	
 	for(; k< NUM_TLB; k++){
-		TLB_Read(&tlb_hi,&tlb_low,k);
+		TLB_Read(&tlb_hi, &tlb_low, k);
 		// skip valid ones
 		if(tlb_low & TLBLO_VALID){
 			continue;
@@ -625,21 +626,16 @@ int handle_vaddr_fault (vaddr_t faultaddress, unsigned int permissions) {
 		//once we find an empty entry, update it with tlb_hi and tlb_loww.
 		tlb_hi = faultaddress;
 		tlb_low = paddr | TLBLO_VALID; // set the physical page frame 's  VALID bit to 1.
-		TLB_Write(tlb_hi, tlb_low,k);
+		TLB_Write(tlb_hi, tlb_low, k);
 		return 0;
 	}
 	// no invalid ones, so we randomly kicked out an entry
 	tlb_hi = faultaddress;
 	tlb_low = paddr | TLBLO_VALID;
-	TLB_Random(tlb_hi,tlb_low);
+	TLB_Random(tlb_hi, tlb_low);
 	return 0;
 }
 
-// /* values for p_flags */
-// #define	PF_R		0x4	/* Segment is readable */
-// #define	PF_W		0x2	/* Segment is writable */
-// #define	PF_X		0x1	/* Segment is executable */
-//#define TLBLO_DIRTY   0x00000400
 
 
 /*
