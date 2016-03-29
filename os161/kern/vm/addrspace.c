@@ -32,6 +32,10 @@ as_create(void)
 	if (as->as_regions == NULL) {
 		return NULL;
 	}
+	// we'll have to wait until the user bss segment is
+	// defined before we know the start of heap
+	as->heap_start = 0;
+	as->heap_end = 0;
 	// initiailize first level page table
 	int i = 0;
 	for (; i < FIRST_LEVEL_PT_SIZE; i++){
@@ -185,8 +189,8 @@ as_define_region(struct addrspace *as, vaddr_t vaddr, size_t sz,
 	if(array_getnum(as->as_regions) == 2){
 		// fuck... this is horribly inelegant, gotta find a better way
 		// to do this
-		as->heap.vbase = vaddr + npages * PAGE_SIZE + 1;
-		as->heap.npages = 0; // heap is empty at start, to be increased 
+		as->heap_start = vaddr + npages * PAGE_SIZE + 1;
+		as->heap_end = as->heap_start; // heap is empty at start, to be increased 
 							 // by the sbrk()
 	}
 

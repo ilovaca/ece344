@@ -519,7 +519,7 @@ vm_fault(int faulttype, vaddr_t faultaddress)
 	#define CLEAR_PAGE_FRAME 0x00000fff
 
 /*
-	Do the right right, since the faulting address has been validated
+	Do the right thing, since the faulting address has been validated
 */
 int handle_vaddr_fault (vaddr_t faultaddress, unsigned int permissions) {
 
@@ -529,7 +529,7 @@ int handle_vaddr_fault (vaddr_t faultaddress, unsigned int permissions) {
 
 	int level1_index = (faultaddress & FIRST_LEVEL_PN) >> 22; 
 	int level2_index = (faultaddress & SEC_LEVEL_PN) >> 12;
-	// since master page table always exists in an address space, we check the 2nd-level page table
+	// check if the 2nd level page table exists
 	struct as_pagetable *level2_pagetable = curthread->t_vmspace->as_master_pagetable[level1_index];
 	/************************************* 2nd Level Pagetable exists***************************************/
 	if(level2_pagetable != NULL) {
@@ -722,7 +722,5 @@ void background_paging(void * args, unsigned int argc) {
 			swap_out(i, disk_addr);
 		}
 	}
-
-
 	splx(spl);
 }

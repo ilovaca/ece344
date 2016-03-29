@@ -39,7 +39,7 @@ void destroy_pcb_unit(u_int32_t pID);
  * See src/lib/libc/syscalls.S and related files.)
  *
  * Upon syscall return the program counter stored in the trapframe
- * must be incremented by one instruction; otherwise the exception
+ * must be incred by one instruction; otherwise the exception
  * return code will restart the "syscall" instruction and the system
  * call will repeat forever.
  *
@@ -103,9 +103,10 @@ mips_syscall(struct trapframe *tf)
 		case SYS_write:
 		err = sys_write(tf, &retval);
 		break;
-
+		case SYS_sbrk:
+		err = sys_sbrk(tf->tf_a0, &retval);
+		break;
 	    /* Add stuff here */
- 
 	    default:
 		kprintf("Unknown syscall %d\n", callno);
 		err = ENOSYS;
@@ -479,18 +480,17 @@ int sys_execv(struct trapframe* tf){
 }*/
 
 
-int sys_sbrk(int increment, int32_t* retval) {
-	// increment can be negative
+int sys_sbrk(int incr, int32_t* retval) {
+	// Nore incr can be negative
 	struct addrspace* as = curthread->t_vmspace;
-	vaddr_t heap_base = as->heap.vbase;
-	vaddr_t heap_top = heap_base + as->heap.npages * PAGE_SIZE;
-	if (heap_top + increment < heap_base) {
-		// increment too negative... falling off the cliff
+	if (as->heap_top + incr < as->heap_base) {
+		// incr too negative... falling off the cliff
 		return EINVAL;
 	}
-	ROUNDUP(increment, sizeof(void*));
-	// TODO: the increment should be of page granularity? 
-	as->heap_end;
-	*retval = heap_end;
+	// make it pointer aligned
+	incr = ROUNDUP(incr, sizeof(void*));
+	// TODO: the incr should be of page granularity? 
+	as->heap_end += incr;
+	*retval = as->heap_end;
 	return 0;
 }

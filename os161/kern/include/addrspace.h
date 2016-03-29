@@ -47,7 +47,9 @@ struct addrspace {
 #else
 	/* Put stuff here for your VM system */
 	struct array* as_regions;
-	struct as_region heap; //TODO
+	// struct as_region heap; //TODO
+	vaddr_t heap_start;
+	vaddr_t heap_end;
     struct as_pagetable *as_master_pagetable[FIRST_LEVEL_PT_SIZE]; // first level page table
 #endif
 };

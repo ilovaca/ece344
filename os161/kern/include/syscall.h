@@ -21,6 +21,8 @@ int sys_read(struct trapframe *, int32_t *);
 
 int sys_write(struct trapframe *, int32_t *);
 
+int sys_sbrk(int increment, int32_t*);
+
 int runprogram_execv(char *progname, int argc, char* argv[]);
 
 int runprogram(char *progname);
