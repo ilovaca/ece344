@@ -3,6 +3,9 @@
 #include <lib.h>
 #include <addrspace.h>
 #include <vm.h>
+#include <bitmap.h>
+#include <machine/tlb.h>
+#include <elf.h>
 
 /*
  * Note! If OPT_DUMBVM is set, as is the case until you start the VM
@@ -28,7 +31,7 @@ as_create(void)
 	}
 	
 	// allocate the array of regions
-	as->regions = array_create();
+	as->as_regions = array_create();
 	if (as->as_regions == NULL) {
 		return NULL;
 	}
@@ -66,7 +69,7 @@ as_copy(struct addrspace *old, struct addrspace **ret)
 	int i;
 	for (i = 0; i < array_getnum(old->as_regions); i++) {
 		struct as_region* temp = kmalloc(sizeof(struct as_region));
-		*temp = *(array_getguy(old->as_regions, i));
+		*temp = *((struct as_region*)array_getguy(old->as_regions, i));
 		array_add(newas->as_regions, temp);
 	}
 	// then both the first and second page table
@@ -104,7 +107,7 @@ as_destroy(struct addrspace *as)
 	}
 	// free all pages in the swap file
 	for(; i < array_getnum(as->as_regions); i++) {
-		struct as_region* cur = (struct as_region*)array_getguy(as->as_regions);
+		struct as_region* cur = (struct as_region*)array_getguy(as->as_regions, i);
 		assert(cur->vbase % PAGE_SIZE == 0);
 		// destroy all pages belonging to this region
 		int j = 0;
@@ -112,7 +115,7 @@ as_destroy(struct addrspace *as)
 			vaddr_t page = cur->vbase + j * PAGE_SIZE;
 			assert((page & PAGE_FRAME) == page);
 			u_int32_t *pte = get_PTE_from_addrspace(as, page);
-			if ((*pte & PTE_PRESENT == 0) && (*pte | PTE_SWAPPED != 0)) {
+			if (((*pte & PTE_PRESENT) == 0) && ((*pte | PTE_SWAPPED) != 0)) {
 				// if this page is in swap file...
 				off_t file_slot = (*pte & SWAPFILE_OFFSET) >> 12;
 				// the occupied bit must be set
@@ -190,33 +193,37 @@ as_define_region(struct addrspace *as, vaddr_t vaddr, size_t sz,
 	if(array_getnum(as->as_regions) == 2){
 		// fuck... this is horribly inelegant, gotta find a better way
 		// to do this
-		as->heap_start = vaddr + npages * PAGE_SIZE + 1;
+		as->heap_start = vaddr + npages * PAGE_SIZE;
 		as->heap_end = as->heap_start; // heap is empty at start, to be increased 
 									   // by the sbrk()
 	}
-
-	return EUNIMP;
+	return 0;
 }
 
 int
 as_prepare_load(struct addrspace *as)
 {
-	/*
-	 * Write this.
-	 */
 
-	(void)as;
+	struct as_region* text = (struct as_region*)array_getguy(as->as_regions, 0); 
+	struct as_region* bss = (struct as_region*)array_getguy(as->as_regions, 1); 
+	// save the original permission
+	as->temp_text_permis = text->region_permis;
+	as->temp_bss_permis = bss->region_permis;
+	//change each region's permission to READ/WRITE
+	text->region_permis |= (PF_R | PF_W);
+	bss->region_permis |= (PF_R | PF_W);
 	return 0;
 }
 
 int
 as_complete_load(struct addrspace *as)
 {
-	/*
-	 * Write this.
-	 */
-
-	(void)as;
+	// restore the original permission
+	struct as_region* text = (struct as_region*)array_getguy(as->as_regions, 0); 
+	struct as_region* bss = (struct as_region*)array_getguy(as->as_regions, 1); 
+	// save the original permission
+	text->region_permis = as->temp_text_permis;
+	bss->region_permis = as->temp_bss_permis;
 	return 0;
 }
 

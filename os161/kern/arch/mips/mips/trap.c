@@ -7,7 +7,7 @@
 #include <vm.h>
 #include <thread.h>
 #include <curthread.h>
-
+#include <syscall.h>
 extern u_int32_t curkstack;
 
 /* in exception.S */
@@ -45,8 +45,8 @@ kill_curthread(u_int32_t epc, unsigned code, u_int32_t vaddr)
 	/*
 	 * You will probably want to change this.
 	 */
-	 int bar;
-	sys__exit(-1,&bar);
+	int bar;
+	sys__exit(-1, &bar);
 	//panic("I don't know how to handle this\n");
 }
 

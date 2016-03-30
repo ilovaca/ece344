@@ -32,7 +32,7 @@ file        lib/copyinout.c			# copyin/out et al.
 #
 defoption   dumbvm
 optfile     dumbvm  arch/mips/mips/dumbvm.c
-
+file 		arch/mips/mips/vm.c
 #
 # Get the files and options for LAMEbus devices.
 #

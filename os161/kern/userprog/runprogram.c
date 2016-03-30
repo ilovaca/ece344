@@ -44,10 +44,6 @@ int allocate_PID(unsigned int * to_pid);
 // argc and argv are in kernel, we need to copy it to the NEW addr space
 
 
-//ramsize=524288
-
-
-
 int
 runprogram(char *progname)
 {

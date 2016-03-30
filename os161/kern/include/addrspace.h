@@ -3,7 +3,7 @@
 
 #include <vm.h>
 #include "opt-dumbvm.h"
-
+#include <machine/spl.h>
 #define FIRST_LEVEL_PT_SIZE 1024
 #define SECOND_LEVEL_PT_SIZE 1024
 struct vnode;
@@ -47,7 +47,8 @@ struct addrspace {
 #else
 	/* Put stuff here for your VM system */
 	struct array* as_regions;
-	// struct as_region heap; //TODO
+	u_int32_t temp_text_permis;	// for as_prepare_load
+	u_int32_t temp_bss_permis;	// for as_perpare_load
 	vaddr_t heap_start;
 	vaddr_t heap_end;
     struct as_pagetable *as_master_pagetable[FIRST_LEVEL_PT_SIZE]; // first level page table

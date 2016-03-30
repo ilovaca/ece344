@@ -2,18 +2,40 @@
 #define _VM_H_
 
 #include <machine/vm.h>
-
+#include <thread.h>
 /*
  * VM system-related definitions.
  *
  * You'll probably want to add stuff here.
  */
+/*************** Structure representing the physical pages/frames in memory ***************/
+
+typedef enum FRAME_STATE {
+	FREE,  // 
+	FIXED, // kernel pages shall remain in physical memory, so does coremap itself
+	DIRTY, // newly allocated user pages shall be dirty
+	ClEAN // never modified since swapped in
+} frame_state;
+typedef struct Frame {
+	struct thread* owner_thread; // could be the addrspace object as well
+	int frame_id;	// position in coremap
+	paddr_t frame_start; // the starting physical address of this page, needed for address translation
+	vaddr_t mapped_vaddr; // the virtual address this frame is mapped to
+	frame_state state; // see below 
+	int num_pages_allocated; // number of contiguous pages in a single allocation (e.g., large kmalloc)
+} frame;
 
 
 /* Fault-type arguments to vm_fault() */
 #define VM_FAULT_READ        0    /* A read was attempted */
 #define VM_FAULT_WRITE       1    /* A write was attempted */
 #define VM_FAULT_READONLY    2    /* A write to a readonly page was attempted*/
+
+/*********************************** Swap file *******************************************/
+
+#define MAX_SWAPFILE_SLOTS 65536 // TODO: we support up to 65536 pages on disk
+#define SWAPFILE_OFFSET 0xfffff000 /* When a page is swapped out, we put the disk slot # 
+							in the first 20 bits (replacing the physical page numebr)*/
 
 
 /* Initialization function */
@@ -44,4 +66,6 @@ int evict_or_swap();
 void swap_out(int frame_id, off_t pos);
 
 void load_page(struct thread* owner_thread, vaddr_t vaddr, int frame_id);
+
+void swapping_init();
 #endif /* _VM_H_ */

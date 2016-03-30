@@ -39,7 +39,7 @@ void destroy_pcb_unit(u_int32_t pID);
  * See src/lib/libc/syscalls.S and related files.)
  *
  * Upon syscall return the program counter stored in the trapframe
- * must be incred by one instruction; otherwise the exception
+ * must be incremented by one instruction; otherwise the exception
  * return code will restart the "syscall" instruction and the system
  * call will repeat forever.
  *
@@ -103,10 +103,9 @@ mips_syscall(struct trapframe *tf)
 		case SYS_write:
 		err = sys_write(tf, &retval);
 		break;
-		case SYS_sbrk:
-		err = sys_sbrk(tf->tf_a0, &retval);
-		break;
+
 	    /* Add stuff here */
+ 
 	    default:
 		kprintf("Unknown syscall %d\n", callno);
 		err = ENOSYS;
@@ -445,52 +444,37 @@ int sys_write(struct trapframe * tf, int32_t* retval) {
 int sys_execv(struct trapframe* tf){
 	return 0;
 }
-/*
-
-int sys_execv(struct trapframe* tf){
-	//clear the current thread's address space
-
-	int char_count = 0;
-	// kernel buf for program path
-	char* prog_path = kmalloc(sizeof(char) * MAX_ARG_LEN);
-	int result = copyinstr((const_userptr_t) tf->tf_a0, (void *)prog_path, MAX_ARG_LEN, &char_count);
-	if (result) {
-		kfree(prog_path);
-		return result;
-	}
-
-	// kernel buf for program args (char **)
-	char** argv = kmalloc(sizeof(char*) * MAX_ARGC);
-	int i = 0;
-	for (; i< MAX_ARGC; i++){
-		argv[i] = kmalloc(sizeof(char) * MAX_ARG_LEN);
-	}
-	int argc = 0;
-	int num_read = 0;
-	do {
-		copyinstr((const_userptr_t)tf->tf_a1, (void *)argv[argc], MAX_ARG_LEN, &num_read);
-		if (num_read != 0) argc++; //tf_a1 stores a pointer.
-	} while (num_read != 0);
-
-	assert(curthread->t_vmspace != NULL);
-	as_destroy(curthread->t_vmspace);
-	// prog_path and argv is in kernel
-	runprogram(prog_path, argc, argv);
-
-}*/
 
 
-int sys_sbrk(int incr, int32_t* retval) {
-	// Nore incr can be negative
-	struct addrspace* as = curthread->t_vmspace;
-	if (as->heap_top + incr < as->heap_base) {
-		// incr too negative... falling off the cliff
-		return EINVAL;
-	}
-	// make it pointer aligned
-	incr = ROUNDUP(incr, sizeof(void*));
-	// TODO: the incr should be of page granularity? 
-	as->heap_end += incr;
-	*retval = as->heap_end;
-	return 0;
-}
+// int sys_execv(struct trapframe* tf){
+// 	//clear the current thread's address space
+
+// 	int char_count = 0;
+// 	// kernel buf for program path
+// 	char* prog_path = kmalloc(sizeof(char) * MAX_ARG_LEN);
+// 	int result = copyinstr((const_userptr_t) tf->tf_a0, (void *)prog_path, MAX_ARG_LEN, &char_count);
+// 	if (result) {
+// 		kfree(prog_path);
+// 		return result;
+// 	}
+
+// 	// kernel buf for program args (char **)
+// 	char** argv = kmalloc(sizeof(char*) * MAX_ARGC);
+// 	int i = 0;
+// 	for (; i< MAX_ARGC; i++){
+// 		argv[i] = kmalloc(sizeof(char) * MAX_ARG_LEN);
+// 	}
+// 	int argc = 0;
+// 	int num_read = 0;
+// 	do {
+// 		copyinstr((const_userptr_t)tf->tf_a1, (void *)argv[argc], MAX_ARG_LEN, &num_read);
+// 		if (num_read != 0) argc++; //tf_a1 stores a pointer.
+// 	} while (num_read != 0);
+
+// 	assert(curthread->t_vmspace != NULL);
+// 	as_destroy(curthread->t_vmspace);
+// 	// prog_path and argv is in kernel
+// 	runprogram(prog_path, argc, argv);
+
+// }
+
