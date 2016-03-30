@@ -74,50 +74,50 @@ vm_bootstrap(void)
 	// get the amount of physical memory
 	ram_getsize(&start, &end);
 	// align start
-	// start += start - start % PAGE_SIZE;
 	start = ROUNDUP(start, PAGE_SIZE);
-	// TODO: THIS ALIGNMENT IS PROBABLY NOT RIGHT
+	kprintf("after ROUNDUP start = 0x%x\n", start);
+
 	num_pages = ((end - start)/ PAGE_SIZE);
-	kprintf("start: %x, end: %x\nnum_pages = %d", start, end, num_pages);
-	// kernel always looks at the virtual memory only
+	kprintf("num_pages = %d\n", num_pages);
+	// kernel always looks at the virtual address only
 	coremap = (frame *)PADDR_TO_KVADDR(start);
 	/************************************** ALLOCATE SPACE *****************************************/
 	// first the coremap
 	start_adjusted = start + num_pages * sizeof(frame); 
 	/************************************** initialize coremap *************************************/
-	int i = 0, fixed_pages = 0, free_pages = 0;
-	fixed_pages = (start_adjusted - start) / PAGE_SIZE + 1;
-	// mark the pages in [start, start_adjusted] as fixed
-	for (; i < fixed_pages; i++) { 
-		coremap[i].owner_thread = curthread;
-		coremap[i].frame_id = i;
-		coremap[i].frame_start = start + PAGE_SIZE * i;
-		coremap[i].mapped_vaddr = PADDR_TO_KVADDR(coremap[i].frame_start);
-		// the fixed pages are mapped to kernel addr space
-		coremap[i].state = FIXED;
-		coremap[i].num_pages_allocated = 0;
+	fixed_pages = 0, free_pages = 0;
+	// these fixed pages are for the coremap
+	int fixed_pages = (start_adjusted - start) / PAGE_SIZE + 1;
+	int free_pages = num_pages - fixed_pages;
+	int i = 0;
+	for (; i < num_pages; ++i) {
+		if(i < fixed_pages) {
+			coremap[i].owner_thread = curthread;
+			coremap[i].frame_id = i;
+			coremap[i].frame_start = start + PAGE_SIZE * i;
+			// the fixed pages are mapped to kernel addr space, i.e. kernel pages have fixed mapping
+			coremap[i].mapped_vaddr = PADDR_TO_KVADDR(coremap[i].frame_start);
+			coremap[i].state = FIXED;
+			coremap[i].num_pages_allocated = 1;
+		} else {
+			// free pages 
+			coremap[i].owner_thread = NULL;
+			coremap[i].frame_id = i;
+			coremap[i].frame_start = start + PAGE_SIZE * i;
+			coremap[i].mapped_vaddr = 0xDEADBEEF; // LOL
+			coremap[i].state = FREE;
+			coremap[i].num_pages_allocated = 0;			
+		}
 	}
-	// mark the pages in [start_adjusted, end] as free 
-	free_pages = num_pages - fixed_pages;
-	assert(num_pages == (fixed_pages + free_pages));
-
-	for (; i < free_pages; i++) {
-		coremap[i].owner_thread = NULL;
-		coremap[i].frame_id = i;
-		coremap[i].frame_start = start + PAGE_SIZE * i;
-		coremap[i].mapped_vaddr = 0xDEADBEEF; // LOL
-		coremap[i].state = FREE;
-		coremap[i].num_pages_allocated = 0;
-	}
-
 	// globals
 	num_frames = num_pages;
 	num_fixed_page = fixed_pages;
 	// sanity check
 	for (i = 0; i < num_frames; i++) {
-		if ((coremap[i].state != FREE && coremap[i].state != FIXED) || ((coremap[i].frame_start % PAGE_SIZE) != 0)) panic("error initializing the coremap"); 
+		if ((coremap[i].state != FREE && coremap[i].state != FIXED) || ((coremap[i].frame_start % PAGE_SIZE) != 0)) 
+			panic("error initializing the coremap"); 
 	}
-	// swapping subsystem init
+	// TODO swapping subsystem init
 	// swapping_init();
 	/**************************************** END of init ******************************************/
 	// TODO: we may want to set some flags to indicate that vm has already bootstrapped, 
@@ -249,31 +249,32 @@ vaddr_t alloc_one_page() {
 
 /*
 	Function to evict or swap multiple pages starting from starting_frame
+	** updates coremap entry && PTE
 */
 void evict_or_swap_multiple(int starting_frame, size_t npages){
 	int i;
-	for (i = 0; i < npages; i++) {
+	for (i = starting_frame; i < npages + starting_frame; i++) {
 		// come on, don't let me down...
-		assert(coremap[starting_frame + i].state != FREE);
-		assert(coremap[starting_frame + i].state != FIXED);
-
-		if (coremap[starting_frame + i].state == DIRTY) {
+		assert(coremap[i].state != FIXED);
+		if (coremap[i].state == DIRTY) {
 			int disk_slot;
 			// find a slot on disk that is not used
 			bitmap_alloc(swapfile_map, &disk_slot);
 			off_t disk_addr = disk_slot * PAGE_SIZE;
-			swap_out(starting_frame + i, disk_addr);
+			swap_out(i, disk_addr);
 		} else {
-		// page clean, no need for swap, just update the PTE and return
+			// page clean, no need for swap
 		}
+		// update coremap entry
+		coremap[i].state = FREE;
+		coremap[i].mapped_vaddr = 0xDEADBEEF;
+		coremap[i].num_pages_allocated = 0;
 		// update PTE of the *swapped* page and return frame id for loading/allocation
-		u_int32_t *pte = get_PTE(coremap[starting_frame + i].owner_thread,
-								 coremap[starting_frame + i].mapped_vaddr);
-		// set the swapped bit (PRESENT BIT = 0)
-		*pte = (*pte & PTE_SWAPPED);	 
-		/*
-		TODO set pte PRESENT bit to zero
-		*/
+		u_int32_t *pte = get_PTE(coremap[i].owner_thread,
+								 coremap[i].mapped_vaddr);
+		// set SWAPPED = 1 and PRESENT = 0
+		*pte &= PTE_SWAPPED;	 
+		*pte &= PTE_UNSET_PRESENT;
 	}
 	return;
 }
@@ -289,34 +290,34 @@ vaddr_t alloc_npages(int npages) {
 	for (; i < num_frames - 1; i++){
 		// as long as we've got enough, we break:)
 		if (num_continous >= npages) break;
-		if (coremap[i].state == FREE && coremap[i + 1].state == FREE) {
+		if ((coremap[i].state == FREE) && (coremap[i + 1].state == FREE)) {
 			num_continous++;
 		} else {
 			num_continous = 1;
 		}
 	}
+	// start is the first page allocated
 	int start = i - npages + 1;
 	if (num_continous >= npages) {
 		// found n continous free pages
 		int j = start;
-		//check if j is bigger than i. If not,meaning that the first npages slots are free
-		for (; j < npages + start; j++)
-			{
-				coremap[j].owner_thread = curthread;
-				coremap[j].state = FIXED;
-				// redundancy not a problem ;)
-				coremap[j].mapped_vaddr = PADDR_TO_KVADDR(coremap[j].frame_start);
-				coremap[j].num_pages_allocated = npages; 
-			}
-			assert(coremap[start].mapped_vaddr == PADDR_TO_KVADDR(coremap[start].frame_start));
-			return PADDR_TO_KVADDR(coremap[start].frame_start);
+		for (; j < npages + start; j++){
+			coremap[j].owner_thread = curthread;
+			coremap[j].state = FIXED;
+			coremap[j].mapped_vaddr = PADDR_TO_KVADDR(coremap[j].frame_start);
+			// redundancy not a problem ;)
+			coremap[j].num_pages_allocated = npages; 
+		}
+		assert(coremap[start].mapped_vaddr == PADDR_TO_KVADDR(coremap[start].frame_start));
+		return PADDR_TO_KVADDR(coremap[start].frame_start);
+
 	} else {
 		// not found, we evict n pages starting from a random page
 		// make sure the n pages does not overflow the end of memory
 		// 		--> search the first num_frames - npages, excluding the fixed pages
 		int starting_frame;
 		int search_range = num_frames - npages - num_fixed_page;
-		do{
+		do {
 			starting_frame = (random() % search_range) + num_fixed_page;
 		} while (coremap[starting_frame].state != FIXED);
 
@@ -328,12 +329,17 @@ vaddr_t alloc_npages(int npages) {
 		}
 		// evict/swap all pages to disk
 		evict_or_swap_multiple(starting_frame, npages);
+		// sanity check: these npages shall now be free
+		for (; i < npages; i++) {
+			if (coremap[i + starting_frame].state != FREE) 
+				panic("alloc_npages contains a non-free page"); 
+		}
 		// allocation
-		for (i = 0; i < npages; i++) {
-			coremap[starting_frame + i].owner_thread = curthread;
-			coremap[starting_frame + i].state = FIXED;
-			coremap[starting_frame + i].mapped_vaddr = PADDR_TO_KVADDR(coremap[starting_frame + i].frame_start);
-			coremap[starting_frame + i].num_pages_allocated = npages; 
+		for (i = starting_frame; i < npages + starting_frame; i++) {
+			coremap[i].owner_thread = curthread;
+			coremap[i].state = FIXED;
+			coremap[i].mapped_vaddr = PADDR_TO_KVADDR(coremap[i].frame_start);
+			coremap[i].num_pages_allocated = npages; 
 		}
 		return PADDR_TO_KVADDR(coremap[starting_frame].frame_start);
 	}
@@ -469,7 +475,7 @@ vm_fault(int faulttype, vaddr_t faultaddress)
 	//if we didn't fall into any region, we check if it falls into the user stack.
 	if(!found){
 		vtop = USERSTACK;
-		// hardcoded stack size
+		// hardcoded stack region
 		vbase = vtop - MAX_STACK_PAGES * PAGE_SIZE; 
 		if(faultaddress >= vbase && faultaddress < vtop){
 			found = 1;
@@ -492,7 +498,7 @@ vm_fault(int faulttype, vaddr_t faultaddress)
 			return err;
 		}
 	}
-	// cannot find the faulting address, probably a segfault
+	// cannot find the faulting address, this is a segfault
 
 	splx(spl);
 	return EFAULT;
