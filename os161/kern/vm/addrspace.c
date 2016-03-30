@@ -169,9 +169,9 @@ as_define_region(struct addrspace *as, vaddr_t vaddr, size_t sz,
 	size_t npages; 
 
 	/* Align the region. First, the base... */
-	assert((vaddr & PAGE_FRAME) == vaddr);
 	sz += vaddr & ~(vaddr_t)PAGE_FRAME;	 
 	vaddr &= PAGE_FRAME;
+	assert((vaddr & PAGE_FRAME) == vaddr);
 
 	/* ...and now the length. */
 	sz = (sz + PAGE_SIZE - 1) & PAGE_FRAME;
