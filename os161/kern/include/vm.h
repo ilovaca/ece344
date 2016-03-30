@@ -68,4 +68,7 @@ void swap_out(int frame_id, off_t pos);
 void load_page(struct thread* owner_thread, vaddr_t vaddr, int frame_id);
 
 void swapping_init();
+
+void as_zero_page(paddr_t paddr, size_t num_pages);
+
 #endif /* _VM_H_ */

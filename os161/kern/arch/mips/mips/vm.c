@@ -243,7 +243,8 @@ vaddr_t alloc_one_page() {
 	// if this is invoked by kmalloc, then the virtual address must be mapped by PADDR_TO_KVADDR
 	coremap[kicked_ass_page].mapped_vaddr = PADDR_TO_KVADDR(coremap[kicked_ass_page].frame_start);
 	coremap[kicked_ass_page].num_pages_allocated = 1;
-	
+	// zero out this page
+	// as_zero_page(coremap[kicked_ass_page].frame_start);
 	return (coremap[kicked_ass_page].mapped_vaddr);
 }
 
@@ -509,8 +510,8 @@ vm_fault(int faulttype, vaddr_t faultaddress)
 	#define PAGE_FRAME 0xfffff000	/* mask to get the page number from vaddr (first 20 bits) */
 	#define PHY_PAGENUM 0xfffff000  /* Redundancy here :) */
 	#define INVALIDATE_PTE 0xfffff3ff  /* invalidate PTE by setting PRESENT and SWAPPED bits to zero */
-	#define KVADDR_TO_PADDR(vaddr) ((vaddr)-MIPS_KSEG0) // not used for now
-	#define CLEAR_PAGE_FRAME 0x00000fff
+	#define KVADDR_TO_PADDR(vaddr) ((vaddr)-MIPS_KSEG0) /* Convert a kernel space vaddr to paddr */
+	#define CLEAR_PAGE_FRAME 0x00000fff /* Zero out the first 20 bits */
 
 /*
 	Do the right thing, since the faulting address has been validated
@@ -634,7 +635,7 @@ int handle_vaddr_fault (vaddr_t faultaddress, unsigned int permissions) {
 /*
 	Function to clear the content of a certain number of pages
 */
-void as_zero_region(paddr_t paddr, size_t num_pages) {
+void as_zero_page(paddr_t paddr, size_t num_pages) {
 	bzero((void *) PADDR_TO_KVADDR(paddr), num_pages * PAGE_SIZE);
 }
 
