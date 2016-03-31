@@ -117,7 +117,7 @@ vm_bootstrap(void)
 			panic("error initializing the coremap"); 
 	}
 	// TODO swapping subsystem init
-	// swapping_init();
+	swapping_init();
 	/**************************************** END of init ******************************************/
 	// TODO: we may want to set some flags to indicate that vm has already bootstrapped, 
 	vm_bootstraped = 1;

@@ -103,9 +103,6 @@ mips_syscall(struct trapframe *tf)
 		case SYS_write:
 		err = sys_write(tf, &retval);
 		break;
-		case SYS_sbrk:
-		err = sys_sbrk(tf->tf_a0, &retval);
-		break;
 
 	    /* Add stuff here */
  
@@ -480,7 +477,6 @@ int sys_execv(struct trapframe* tf){
 // 	runprogram(prog_path, argc, argv);
 
 // }
-
 
 int sys_sbrk(int incr, int32_t* retval) {
 	// Nore incr can be negative
