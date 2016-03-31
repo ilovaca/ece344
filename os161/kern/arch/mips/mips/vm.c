@@ -210,7 +210,7 @@ paddr_t alloc_page_userspace(vaddr_t va) {
 		kicked_ass_page = evict_or_swap();
 	}
 	assert(kicked_ass_page >= 0);
-	assert(coremap[kicked_ass_page].state == FREE || coremap[kicked_ass_page] == CLEAN);
+	assert(coremap[kicked_ass_page].state == FREE || coremap[kicked_ass_page].state == CLEAN);
 	// now update coremap entry
 	coremap[kicked_ass_page].owner_thread = curthread;
 	coremap[kicked_ass_page].state = DIRTY; 
@@ -418,9 +418,6 @@ free_kpages(vaddr_t addr)
 int
 vm_fault(int faulttype, vaddr_t faultaddress)
 {
-	vaddr_t vbase1, vtop1, vbase2, vtop2, stackbase, stacktop;
-	paddr_t paddr;
-	u_int32_t tlb_hi, tlb_low;
 	struct addrspace *as;
 	int spl;
 
@@ -452,7 +449,6 @@ vm_fault(int faulttype, vaddr_t faultaddress)
 		return EFAULT;
 	}
 
-	vaddr_t faulting_PN = 0;
 	unsigned int permissions = 0;
 	vaddr_t vbase, vtop;
 	/*********************************** Check the validity of the faulting address ******************************/
@@ -510,7 +506,7 @@ vm_fault(int faulttype, vaddr_t faultaddress)
 }
 
 	#define FIRST_LEVEL_PN 0xffc00000 /* mask to get the 1st-level pagetable index from vaddr (first 10 bits) */
-	#define SEC_LEVEL_PN 0x003fc000	/* mask to get the 2nd-level pagetable index from vaddr (mid 10 bits) */
+	#define SEC_LEVEL_PN 0x003ff000	/* mask to get the 2nd-level pagetable index from vaddr (mid 10 bits) */
 	#define PAGE_FRAME 0xfffff000	/* mask to get the page number from vaddr (first 20 bits) */
 	#define PHY_PAGENUM 0xfffff000  /* Redundancy here :) */
 	#define INVALIDATE_PTE 0xfffff3ff  /* invalidate PTE by setting PRESENT and SWAPPED bits to zero */
@@ -522,7 +518,7 @@ vm_fault(int faulttype, vaddr_t faultaddress)
 */
 int handle_vaddr_fault (vaddr_t faultaddress, unsigned int permissions) {
 
-	assert(curspl > 0);
+	int spl = splhigh();
 	vaddr_t vaddr;
 	paddr_t physical_PN, paddr;
 
@@ -543,7 +539,7 @@ int handle_vaddr_fault (vaddr_t faultaddress, unsigned int permissions) {
 
 			if (permissions & PF_W) {
 				// if we have the permission to write, we set the TLB dirty bit
-				paddr |= TLBLO_DIRTY; //set DIRTY bit to 1. 
+				paddr |= TLBLO_DIRTY;
 			}
 
 		} else {
@@ -631,12 +627,14 @@ int handle_vaddr_fault (vaddr_t faultaddress, unsigned int permissions) {
 		tlb_hi = faultaddress;
 		tlb_low = paddr | TLBLO_VALID; // set the physical page frame 's  VALID bit to 1.
 		TLB_Write(tlb_hi, tlb_low, k);
+		splx(spl);
 		return 0;
 	}
 	// no invalid ones, so we randomly kicked out an entry
 	tlb_hi = faultaddress;
 	tlb_low = paddr | TLBLO_VALID;
 	TLB_Random(tlb_hi, tlb_low);
+	splx(spl);
 	return 0;
 }
 

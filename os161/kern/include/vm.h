@@ -14,7 +14,7 @@ typedef enum FRAME_STATE {
 	FREE,  // 
 	FIXED, // kernel pages shall remain in physical memory, so does coremap itself
 	DIRTY, // newly allocated user pages shall be dirty
-	ClEAN // never modified since swapped in
+	CLEAN, // never modified since swapped in
 } frame_state;
 typedef struct Frame {
 	struct thread* owner_thread; // could be the addrspace object as well
@@ -50,7 +50,7 @@ void free_kpages(vaddr_t addr);
 
 /************************************************************************************/
 #define FIRST_LEVEL_PN 0xffc00000 /* mask to get the 1st-level pagetable index from vaddr (first 10 bits) */
-#define SEC_LEVEL_PN 0x003fc000	/* mask to get the 2nd-level pagetable index from vaddr (mid 10 bits) */
+#define SEC_LEVEL_PN 0x003ff000	/* mask to get the 2nd-level pagetable index from vaddr (mid 10 bits) */
 #define PAGE_FRAME 0xfffff000	/* mask to get the page number from vaddr (first 20 bits) */
 #define PHY_PAGENUM 0xfffff000  /* Redundancy here :) */
 #define INVALIDATE_PTE 0xfffff3ff  /* invalidate PTE by setting PRESENT and SWAPPED bits to zero */
