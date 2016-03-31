@@ -98,7 +98,8 @@ as_destroy(struct addrspace *as)
 	int i = 0;
 	// free all coremap entries
 	for (; i < num_frames; i++) {
-		if(coremap[i].owner_thread->t_vmspace == as){
+		// TODO owner thread could be null
+		if(coremap[i].state != FREE && coremap[i].owner_thread->t_vmspace == as){
 			coremap[i].owner_thread = NULL;
 			coremap[i].mapped_vaddr = 0;
 			coremap[i].state = FREE;
@@ -241,5 +242,4 @@ as_define_stack(struct addrspace *as, vaddr_t *stackptr)
 
 	return 0;
 }
-
 
