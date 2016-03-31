@@ -103,6 +103,9 @@ mips_syscall(struct trapframe *tf)
 		case SYS_write:
 		err = sys_write(tf, &retval);
 		break;
+		case SYS_sbrk:
+		err = sys_sbrk(tf->tf_a0, &retval);
+		break;
 
 	    /* Add stuff here */
  
@@ -478,3 +481,17 @@ int sys_execv(struct trapframe* tf){
 
 // }
 
+
+int sys_sbrk(int incr, int32_t* retval) {
+	// Nore incr can be negative
+	struct addrspace* as = curthread->t_vmspace;
+	if (as->heap_end + incr < as->heap_start) {
+		// incr too negative... falling off the cliff
+		return EINVAL;
+	}
+	// make it 4 bytes aligned
+	incr = ROUNDUP(incr, sizeof(void*));
+	as->heap_end += incr;
+	*retval = as->heap_end;
+	return 0;
+}
