@@ -82,7 +82,7 @@ boot(void)
 	/* Default bootfs - but ignore failure, in case emu0 doesn't exist */
 	vfs_setbootfs("emu0");
 
-	// swapping_init();
+	swapping_init();
 	/*
 	 * Make sure various things aren't screwed up.
 	 */

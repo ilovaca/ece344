@@ -18,7 +18,8 @@ typedef enum FRAME_STATE {
 } frame_state;
 
 typedef struct Frame {
-	struct thread* owner_thread; // could be the addrspace object as well
+	// struct thread* owner_thread; // could be the addrspace object as well
+	struct addrspace* addrspace;
 	int frame_id;	// position in coremap
 	paddr_t frame_start; // the starting physical address of this page, needed for address translation
 	vaddr_t mapped_vaddr; // the virtual address this frame is mapped to
@@ -66,12 +67,16 @@ int evict_or_swap();
 
 void swap_out(int frame_id, off_t pos);
 
-void load_page(struct thread* owner_thread, vaddr_t vaddr, int frame_id);
+void load_page(struct addrspace* addrspace, vaddr_t vaddr, int frame_id);
 
 void swapping_init();
 
 void as_zero_page(paddr_t paddr, size_t num_pages);
 
 int handle_vaddr_fault (vaddr_t faultaddress, unsigned int permissions);
+
+paddr_t fetch_page(struct addrspace* as, vaddr_t va);
+
+paddr_t alloc_page_userspace(vaddr_t va);
 
 #endif /* _VM_H_ */
