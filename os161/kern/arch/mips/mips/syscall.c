@@ -9,7 +9,10 @@
 #include <thread.h>
 #include <addrspace.h>
 #include <array.h>
+#include <vfs.h>
 #include "syscall.h"
+#include <kern/unistd.h>
+
 // Kernel process table
 extern pcb_t * PCBs[MAX_PID];
 extern struct lock* lock;
@@ -83,7 +86,7 @@ mips_syscall(struct trapframe *tf)
 		err = sys_reboot(tf->tf_a0);
 		break;
 		case SYS_execv:
-		err = sys_execv(tf);
+		err = sys_execv(tf->tf_a0, tf->tf_a1);
 		break;
 		case SYS_fork:
 		err = sys_fork(tf, &retval);
@@ -167,7 +170,6 @@ md_forkentry(void* tf, unsigned long vmspace)
 	as_activate(curthread->t_vmspace);
 
 	child_tf = *tf_parent;
-	//kprintf("about to switch to user mode \n");
 	mips_usermode(&child_tf);
 
 	// we should never reach here
@@ -204,7 +206,6 @@ int allocate_PID(unsigned int * to_pid){
 
 int sys_fork(struct trapframe *tf, int * retval){
 	int spl = splhigh();
-//	kprintf(" process %d enter sys_fork\n", curthread->pID);
 	struct addrspace * child_vmspace;
 	// copy the parent's address space
 	int result = as_copy(curthread->t_vmspace, &child_vmspace);
@@ -229,7 +230,6 @@ int sys_fork(struct trapframe *tf, int * retval){
 		(void*)child_tf, (unsigned long)child_vmspace, 
 		md_forkentry,
 		&child_thread);
-	//kprintf("process %d now has child process %d\n",curthread->pID,child_thread->pID);
 
 	assert(child_thread != NULL);
 	// parent returns the child pID
@@ -447,7 +447,7 @@ int sys_write(struct trapframe * tf, int32_t* retval) {
 // 	return 0;
 // }
 
-
+/*
 int sys_execv(struct trapframe* tf){
 	//clear the current thread's address space
 
@@ -479,6 +479,192 @@ int sys_execv(struct trapframe* tf){
 	runprogram_exev(prog_path, argv, argc);
 
 }
+*/
+#define MAX_PATH_LEN 128
+int sys_execv(const char *prog_path, char **args) {
+	int spl = splhigh();
+	// the prog_path is in user space, we need to copy it into kernel space
+	if(prog_path == NULL) {
+		return EINVAL;
+	}
+	char* program = (char *) kmalloc(MAX_PATH_LEN * sizeof(char));
+	int size;
+	int result = copyinstr((const_userptr_t) prog_path, program, MAX_PATH_LEN, &size);
+	if(result) {
+		kfree(program);
+		return EFAULT;
+	}
+
+	char** argv = (char**) kmalloc(sizeof(char**));
+	result = copyin((const_userptr_t)args, argv, sizeof(char **));
+	if(result) {
+		kfree(program);
+		kfree(argv);
+		return EFAULT;
+	}
+
+	int i = 0;
+	while(args[i] != NULL){
+		argv[i] = (char*) kmalloc(sizeof(char) * MAX_ARG_LEN);
+		if(copyinstr((const_userptr_t) args[i], argv[i], MAX_ARG_LEN, &size) != 0) {
+			return EFAULT;
+		}
+		i++;
+	}
+	argv[i] = NULL;
+	// runprogram_exev_syscall(program, argv, i);
+	/*********************** runprogram starts*****************/
+
+	struct vnode *v;
+	vaddr_t entrypoint, stackptr;	
+
+	result = vfs_open(program, O_RDONLY, &v);
+
+	if (result) {
+		return result;
+	}
+
+	// destroy the old addrspace
+	if(curthread->t_vmspace != NULL){
+		as_destroy(curthread->t_vmspace);
+		curthread->t_vmspace = NULL;
+	}
+
+	assert(curthread->t_vmspace == NULL);
+
+	// Create a new address space. 
+	curthread->t_vmspace = as_create();
+	if (curthread->t_vmspace==NULL) {
+		vfs_close(v);
+		return ENOMEM;
+	}
+
+	// Activate it. 
+	as_activate(curthread->t_vmspace);
+
+	// Load the executable. 
+	result = load_elf(v, &entrypoint); // Load an ELF executable user program into the current address space and
+	// returns the entry point (initial PC) for the program in ENTRYPOINT.
+	if (result) {
+		vfs_close(v);
+		return result;
+	}
+	vfs_close(v);
+
+	result = as_define_stack(curthread->t_vmspace, &stackptr);
+	if (result) {
+		// thread_exit destroys curthread->t_vmspace 
+		return result;
+	}
+
+	/******************* copy kernel args to user stack *****************/
+	// int j = 0;
+	// while(argv[j] != NULL){
+	// 	int len = 1 + strlen(argv[j]);
+	// 	len = ROUNDUP(len, 4);
+	// 	stackptr -= len;
+	// 	result = copyoutstr(argv[j],(userptr_t)stackptr, len, &len); 
+	// 	if(result){
+	// 		return result;
+	// 	}
+	// 	// this is fucking weird...
+	// 	argv[j] = (char*)stackptr;
+	// 	j++;
+	// }
+
+	// argv[j] = NULL;
+	// size_t arg_size = j * sizeof(char*);
+	// stackptr -= arg_size;
+	// stackptr -= stackptr % 8;
+	// copyout(argv, stackptr, arg_size);
+
+	/*******************************************************************/
+	// the argument strings
+	int j = 0; 
+	for (j = i - 1; j >= 0; j--) {
+		int len = 1 + strlen(argv[j]);
+		len = ROUNDUP(len, 8);
+		stackptr -= len;
+		assert(stackptr % 8 == 0);
+		char* a = argv[j];
+		argv[j] = stackptr;
+		result = copyoutstr(a,(userptr_t)stackptr, len, &len); 
+	}
+	// then the pointers to arguments
+	argv[i] = NULL;
+	stackptr -= i * sizeof(char *);
+	stackptr -= stackptr % 8;
+	assert(stackptr % 8 == 0);
+	copyout(argv, stackptr, i * sizeof(char*));
+
+
+	md_usermode(i, stackptr, stackptr, entrypoint); 
+	panic("md_usermode returned\n");
+	return EINVAL;
+
+
+	/*char** args = argv;
+	int index = 0;
+	while (args[index] != NULL ) {
+		char * arg;
+		int len = strlen(args[index]) + 1; // +1 for Null terminator \0
+
+		int oglen = len;
+		if (len % 4 != 0) {
+			len = len + (4 - len % 4);
+		}
+
+		arg = kmalloc(sizeof(len));
+		arg = kstrdup(args[index]);
+		
+		for ( i = 0; i < len; i++) {
+
+			if (i >= oglen)
+				arg[i] = '\0';
+			else
+				arg[i] = args[index][i];
+		}
+
+		stackptr -= len;
+
+		result = copyout((const void *) arg, (userptr_t) stackptr,
+				(size_t) len);
+		if (result) {
+			//kprintf("EXECV- copyout1 failed %d\n",result);
+			kfree(program);
+			kfree(args);
+			kfree(arg);
+			return result;
+		}
+
+		kfree(arg);
+		args[index] = (char *) stackptr;
+
+		index++;
+	}
+
+	if (args[index] == NULL ) {
+		stackptr -= 4 * sizeof(char);
+	}
+
+	for ( i = (index - 1); i >= 0; i--) {
+		stackptr = stackptr - sizeof(char*);
+		result = copyout((const void *) (args + i), (userptr_t) stackptr,
+				(sizeof(char *)));
+		if (result) {
+			//kprintf("EXECV- copyout2 failed, Result %d, Array Index %d\n",result, i);
+			kfree(program);
+			kfree(args);
+			return result;
+		}
+	}*/
+
+
+	//md_usermode(index, stackptr, stackptr, entrypoint); 
+	panic("md_usermode returned\n");
+	return EINVAL;
+}
+
 
 int sys_sbrk(int incr, int32_t* retval) {
 	// Nore incr can be negative

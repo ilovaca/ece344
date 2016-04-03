@@ -82,18 +82,18 @@ as_copy(struct addrspace *old, struct addrspace **ret)
 	for (i = 0; i < FIRST_LEVEL_PT_SIZE; i++) {
 		if(old->as_master_pagetable[i] != NULL) {
 			newas->as_master_pagetable[i] = (struct as_pagetable*)kmalloc(sizeof(struct as_pagetable));
-			// what the fuck am i doing?
+			// what the f**k am i doing?
 			// the right thing to do here is to go through all PTEs of the old addrspace, if there's a 
 			// valid PTE, meaning there's a page, be it PRESENT or SWAPPED, belonging to this addrspace.
 			struct as_pagetable *src_pt = old->as_master_pagetable[i];
 			struct as_pagetable *dest_pt = newas->as_master_pagetable[i];
 			unsigned int j = 0;
 			for (; j < SECOND_LEVEL_PT_SIZE; j++) {
-					dest_pt->PTE[j] = 0;
-
+				
+				dest_pt->PTE[j] = 0;
 				if(src_pt->PTE[j] & PTE_PRESENT) {
 					// this source page is PRESENT in memory, we just allocate a page for 
-					// the destination addrspace and copy src->dest and do update PTE
+					// the destination addrspace and copy src->dest and update PTE
 					paddr_t src_paddr = (src_pt->PTE[j] & PAGE_FRAME);
 					vaddr_t dest_vaddr = (i << 22) + (j << 12);
 					// allocate a page for the destination addrspace, while making sure
@@ -106,7 +106,7 @@ as_copy(struct addrspace *old, struct addrspace **ret)
 					// update the PTE of the destination pagetable
 					// dest_pt->PTE[j] &= CLEAR_PAGE_FRAME;
 					dest_pt->PTE[j] |= dest_paddr;
-					dest_pt->PTE[j] &= PTE_PRESENT;
+					dest_pt->PTE[j] |= PTE_PRESENT;
 
 				} else if (src_pt->PTE[j] & PTE_SWAPPED){
 					// this source page is SWAPPED, we load it back to mem :)
@@ -122,7 +122,7 @@ as_copy(struct addrspace *old, struct addrspace **ret)
 					// update the PTE of the destination pagetable
 					// dest_pt->PTE[j] &= CLEAR_PAGE_FRAME;
 					dest_pt->PTE[j] |= dest_paddr;
-					dest_pt->PTE[j] &= PTE_PRESENT;
+					dest_pt->PTE[j] |= PTE_PRESENT;
 				} else {
 					// this source page is neither PRESENT nor SWAPPED, meaning this
 					// page does not exist, we've got nothing to do in this case, nice :)
@@ -133,52 +133,6 @@ as_copy(struct addrspace *old, struct addrspace **ret)
 			newas->as_master_pagetable[i] = NULL;
 		} 
 	}
-
-	/********************* Copy pages :) ***********************/
-	// go through all regions to copy user pages
-/*	for (i = 0; i < array_getnum(old->as_regions); i++) {
-		struct as_region* dest = array_getguy(newas->as_regions, i);
-		struct as_region* src = array_getguy(old->as_regions, i);
-		// copy each page in this region
-		int j = 0;
-		for (; j < src->npages; j++){
-			vaddr_t vbase = dest->vbase + j * PAGE_SIZE;
-			assert(vbase % PAGE_SIZE == 0);
-			// make sure both the pages are in physical memory
-			paddr_t src_addr = fetch_page(old, vbase);
-			paddr_t dest_addr = fetch_page(newas, vbase);
-			fetch_two_pages(old, vbase, newas, vbase);
-			assert(src_addr != dest_addr);
-			memmove((void *) PADDR_TO_KVADDR(dest_addr),
-					(const void*)PADDR_TO_KVADDR(src_addr),
-					PAGE_SIZE) ;
-		}
-	}
-	
-	// now stack pages
-	vaddr_t stackbase = USERSTACK - MAX_STACK_PAGES * PAGE_SIZE;
-	assert(stackbase % PAGE_SIZE == 0);
-	for (i = 0; i < MAX_STACK_PAGES; i++) {
-		vaddr_t vbase = stackbase + i * PAGE_SIZE;
-		paddr_t src_addr = fetch_page(old, vbase);
-		paddr_t dest_addr = fetch_page(newas, vbase);
-		memmove((void *) PADDR_TO_KVADDR(dest_addr),
-				(const void*)PADDR_TO_KVADDR(src_addr),
-				PAGE_SIZE);
-	}
-	memmove((void *) stackbase, (const void *) stackbase, MAX_STACK_PAGES);
-	// now the heap
-	size_t heap_size = ROUNDUP((newas->heap_end - newas->heap_start), PAGE_SIZE);
-	assert(heap_size % PAGE_SIZE == 0);
-	for(i = 0; i < heap_size / PAGE_SIZE; i++) {
-		vaddr_t vbase = old->heap_start + i * PAGE_SIZE;
-		paddr_t src_addr = fetch_page(old, vbase);
-		paddr_t dest_addr = fetch_page(newas, vbase);
-		memmove((void *) PADDR_TO_KVADDR(dest_addr),
-				(const void*)PADDR_TO_KVADDR(src_addr),
-				PAGE_SIZE) ;
-	}
- 	*/
 	*ret = newas;
 	splx(spl);
 	return 0;

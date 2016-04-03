@@ -83,6 +83,7 @@ boot(void)
 	vfs_setbootfs("emu0");
 
 	swapping_init();
+	
 	/*
 	 * Make sure various things aren't screwed up.
 	 */

@@ -330,13 +330,7 @@ thread_fork(const char *name,
 	PCBs[newguy->pID] -> exit_code = -1;
 	PCBs[newguy->pID] -> this_thread = curthread;
 	PCBs[newguy->pID] -> parent = curthread-> pID;
-
-	//#ifdef SEM_IMPL
-		PCBs[newguy->pID] -> mutex = sem_create("child_process_mux", 1);
-	//#elif CV_IMPL
-	//	PCBs[newguy->pID] -> cv = cv_create("bar");
-	//	lock_release(lock);
-	//#endif
+	PCBs[newguy->pID] -> mutex = sem_create("child_process_mux", 1);
 	
 
 	/********************************************************************/

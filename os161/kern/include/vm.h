@@ -35,7 +35,7 @@ typedef struct Frame {
 
 /*********************************** Swap file Related *******************************************/
 
-#define MAX_SWAPFILE_SLOTS 65536 // TODO: we support up to 65536 pages on disk
+#define MAX_SWAPFILE_SLOTS 1024 // TODO: we support up to 65536 pages on disk
 #define SWAPFILE_OFFSET 0xfffff000 /* When a page is swapped out, we put the disk slot # 
 							in the first 20 bits (replacing the physical page numebr)*/
 

@@ -26,8 +26,9 @@ size_t num_frames;
 size_t num_fixed_page;
 /*********************************** Swap file *******************************************/
 struct vnode * swap_file;
-off_t cur_pos;
 struct bitmap* swapfile_map;
+int * testptr;
+int testptr2;
  /**************************** Convenience Function **************************************/
 void swap_out(int frame_id, off_t pos);
 
@@ -40,14 +41,20 @@ u_int32_t* get_PTE_from_addrspace (struct addrspace*, vaddr_t va);
 int vm_bootstraped = 0;
 /*****************************************************************************************/
 
+
+
 void swapping_init(){
 	// for swapping subsystem
-	int err = vfs_open("swapfile", O_RDWR|O_CREAT, &swap_file);
+	int err = vfs_open("swapfile", O_RDWR|O_CREAT|O_TRUNC, &swap_file);
 	if (err) {
 		panic("vfs_open on swap_file failed");
 	}
-	cur_pos = 0;
 	swapfile_map = bitmap_create(MAX_SWAPFILE_SLOTS);
+	// testptr = kmalloc(4);
+	// *testptr = 10101010;
+	// struct uio u;
+	// mk_kuio(&u, testptr, 4, 1000, UIO_WRITE);
+	// VOP_WRITE(swap_file, &u);
 }
 
 paddr_t
@@ -75,10 +82,8 @@ vm_bootstrap(void)
 	ram_getsize(&start, &end);
 	// align start
 	start = ROUNDUP(start, PAGE_SIZE);
-	kprintf("after ROUNDUP start = 0x%x\n", start);
 
 	num_pages = ((end - start)/ PAGE_SIZE);
-	kprintf("num_pages = %d\n", num_pages);
 	// kernel always looks at the virtual address only
 	coremap = (frame *)PADDR_TO_KVADDR(start);
 	/************************************** ALLOCATE SPACE *****************************************/
@@ -556,6 +561,11 @@ vm_fault(int faulttype, vaddr_t faultaddress)
 
 	unsigned int permissions = 0;
 	vaddr_t vbase, vtop;
+	/*************************************************************************************************************/
+	// struct uio u;
+	// mk_kuio(&u, &testptr2, 4, 1000, UIO_READ);
+	// VOP_READ(swap_file, &u);
+
 	/*********************************** Check the validity of the faulting address ******************************/
 	int i = 0;
 	int found = 0;
@@ -747,8 +757,9 @@ void as_zero_page(paddr_t paddr, size_t num_pages) {
 	Function to write a page to swap_file
 	@param frame_id, pos is the starting offset for the write operation
 	@precondition: the frame shall be DIRTY before calling this function
-	** Note:  does not update either pte or coremap, it is up to the caller 
-	to do whatever appropriate
+	** Note:  It only invalidates the TLB entry but does not update either 
+	pte or coremap, it is up to the caller to do whatever appropriate
+
 */
 void swap_out(int frame_id, off_t pos) {
 	assert(curspl > 0);
@@ -761,6 +772,17 @@ void swap_out(int frame_id, off_t pos) {
 	int result = VOP_WRITE(swap_file, &u);
 	if(result){
 		panic("write page to disk failed");
+	}
+	// invalidate the TLB entry of this swapped page
+	u_int32_t tlb_hi, tlb_low;
+	int k = 0;	
+	for(; k< NUM_TLB; k++){
+		TLB_Read(&tlb_hi, &tlb_low, k);
+		if(((tlb_hi & PAGE_FRAME) == coremap[frame_id].mapped_vaddr) 
+			&& ((tlb_low & PAGE_FRAME) == coremap[frame_id].frame_start)){
+			// found it
+			TLB_Write(TLBHI_INVALID(k), TLBLO_INVALID(), k);
+		}
 	}
 	return;
 }
@@ -795,6 +817,8 @@ paddr_t fetch_page(struct addrspace* as, vaddr_t va){
 /*
 	Loads a page to physical memory at the specified frame_id
 	@precondition: the physical page at frame_id must be free for loading
+	NOTE: this only modifies the coremap entry, but does not touch the
+	PTE or page table
 */
 void load_page(struct addrspace* addrspace, vaddr_t vaddr, int frame_id) {
 	u_int32_t *pte = get_PTE_from_addrspace(addrspace, vaddr); 
@@ -802,8 +826,9 @@ void load_page(struct addrspace* addrspace, vaddr_t vaddr, int frame_id) {
 	// the first 20 bits is the slot of the page in swapfile
 	off_t pos = ((*pte & SWAPFILE_OFFSET) >> 12) * PAGE_SIZE; 
 	struct uio u;
-	paddr_t dest = coremap[frame_id].frame_start;
-	mk_kuio(&u, PADDR_TO_KVADDR(dest), PAGE_SIZE, pos, UIO_READ);
+	// the destination address is the frame start
+	paddr_t src = coremap[frame_id].frame_start;
+	mk_kuio(&u, PADDR_TO_KVADDR(src), PAGE_SIZE, pos, UIO_READ);
 	int result = VOP_READ(swap_file, &u);
 	if (result) {
 		panic("load page from disk failed");
@@ -812,6 +837,7 @@ void load_page(struct addrspace* addrspace, vaddr_t vaddr, int frame_id) {
 	coremap[frame_id].addrspace = addrspace;
 	coremap[frame_id].mapped_vaddr = vaddr;
 	coremap[frame_id].state = DIRTY; // not really, but safety first
+	coremap[frame_id].num_pages_allocated = 1;
 	return;
 }
 
