@@ -35,7 +35,7 @@ typedef struct Frame {
 
 /*********************************** Swap file Related *******************************************/
 
-#define MAX_SWAPFILE_SLOTS 1024 // TODO: we support up to 65536 pages on disk
+#define MAX_SWAPFILE_SLOTS 1280 // TODO: we support up to 65536 pages on disk
 #define SWAPFILE_OFFSET 0xfffff000 /* When a page is swapped out, we put the disk slot # 
 							in the first 20 bits (replacing the physical page numebr)*/
 
@@ -75,7 +75,7 @@ void as_zero_page(paddr_t paddr, size_t num_pages);
 
 int handle_vaddr_fault (vaddr_t faultaddress, unsigned int permissions);
 
-paddr_t fetch_page(struct addrspace* as, vaddr_t va);
+paddr_t load_swapped_page(struct addrspace* as, vaddr_t va);
 
 paddr_t alloc_page_userspace(vaddr_t va);
 

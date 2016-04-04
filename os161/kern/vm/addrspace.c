@@ -115,7 +115,7 @@ as_copy(struct addrspace *old, struct addrspace **ret)
 					// this source page is SWAPPED, we load it back to mem :)
 					vaddr_t src_vaddr = (i << 22) + (j << 12);
 					vaddr_t dest_vaddr = src_vaddr;
-					paddr_t src_paddr = fetch_page(old, src_vaddr);
+					paddr_t src_paddr = load_swapped_page(old, src_vaddr);
 					// now allocate a user page, but becareful not to swap out the 
 					// source page we just brought in...
 					paddr_t dest_paddr = alloc_page_userspace_with_avoidance(dest_vaddr, src_paddr);

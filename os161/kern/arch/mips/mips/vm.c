@@ -13,12 +13,13 @@
 #include <elf.h>
 #include <uio.h>
 #include <vnode.h>
-/******************************************************************************************/
+#include <kern/stat.h>
+/*****************************************************************************************/
 #define PTE_PRESENT 0x00000800
 #define PTE_SWAPPED 0x00000400
 #define PTE_UNSET_PRESENT 0xfffff7ff
 #define PTE_UNSET_SWAPPED 0xfffffbff
-/********************************** Extern Declarations************************************/
+/********************************** Extern Declarations***********************************/
 extern struct thread* curthread;
 
 /*********************************** The Coremap *****************************************/
@@ -28,42 +29,33 @@ size_t num_fixed_page;
 /*********************************** Swap file *******************************************/
 struct vnode * swap_file;
 struct bitmap* swapfile_map;
-
-char * kernbuf;
-char* kernbuf2;
-/**************************** Convenience Function **************************************/
+/**************************** Convenience Function ***************************************/
 void swap_out(int frame_id, off_t pos);
 
 void load_page(struct addrspace* addrspace, vaddr_t vaddr, int frame_id);
 
 u_int32_t* get_PTE (struct thread*, vaddr_t va);
 u_int32_t* get_PTE_from_addrspace (struct addrspace*, vaddr_t va);
-
-/********************************* Some bookkeepping data ********************************/
+int get_free_frame_kernel();
+/********************************* Some bookkeepping data*********************************/
 int vm_bootstraped = 0;
+int total_disk_slots;
 /*****************************************************************************************/
-
-
+paddr_t load_swapped_page(struct addrspace* as, vaddr_t va);
+int get_free_frame();
 
 void swapping_init(){
 	// for swapping subsystem
+	int spl = splhigh();
 	int err = vfs_open("lhd1raw:", O_RDWR, &swap_file);
 	if (err) {
 		panic("vfs_open on lhad1 failed");
 	}
-	swapfile_map = bitmap_create(MAX_SWAPFILE_SLOTS);
-	/*kernbuf = kmalloc(PAGE_SIZE * sizeof(char));
-	int i = 0;
-		kernbuf2 = kmalloc(PAGE_SIZE * sizeof(char));
-
-	for(; i < PAGE_SIZE; i++){
-		kernbuf[i] = 'a';
-	}
-	struct uio u;
-	mk_kuio(&u, kernbuf, PAGE_SIZE, 0, UIO_WRITE);
-	if(VOP_WRITE(swap_file, &u)){
-		panic("VOP_WRITE failed");
-	}*/
+	struct stat stat;
+	VOP_STAT(swap_file, &stat);
+	total_disk_slots = stat.st_size / PAGE_SIZE;
+	swapfile_map = bitmap_create(total_disk_slots);
+	splx(spl);
 }
 
 paddr_t
@@ -145,6 +137,7 @@ u_int32_t* get_PTE(struct thread* addrspace_owner, vaddr_t va) {
 	return get_PTE_from_addrspace(addrspace_owner->t_vmspace, va);
 }
 u_int32_t* get_PTE_from_addrspace (struct addrspace* as, vaddr_t va){
+	assert(curspl > 0);
 	int level1_index = (va & FIRST_LEVEL_PN) >> 22; 
 	int level2_index = (va & SEC_LEVEL_PN) >> 12;
 	struct as_pagetable* level2_pagetable = as->as_master_pagetable[level1_index];
@@ -162,48 +155,73 @@ int evict_or_swap_with_avoidance(paddr_t avoid){
 	int kicked_ass_page;
 	do{
 		kicked_ass_page = random() % num_frames;
-	} while (coremap[kicked_ass_page].state != DIRTY 
-				|| coremap[kicked_ass_page].state != CLEAN 
-				|| coremap[kicked_ass_page].frame_start == avoid);
+	} while (coremap[kicked_ass_page].state == FIXED 
+				|| coremap[kicked_ass_page].frame_start == avoid
+				|| coremap[kicked_ass_page].state == FREE);
 
 	int disk_slot;
 	if (coremap[kicked_ass_page].state == DIRTY) {
+		// page is dirty, swap out :)
 		bitmap_alloc(swapfile_map, &disk_slot);
-				assert(disk_slot <= 1280);
-
+		// cannot exceed total_disk_slots pages
+		assert(disk_slot < total_disk_slots);
 		off_t disk_addr = disk_slot * PAGE_SIZE;
 		swap_out(kicked_ass_page, disk_addr);
-		// update coremap entry
-		// update PTE of the *swapped* page and return frame id for loading/allocation
-		u_int32_t *pte = get_PTE_from_addrspace(coremap[kicked_ass_page].addrspace,
-								 coremap[kicked_ass_page].mapped_vaddr);
-		// set the SWAPPED bit and unset the PRESENT bit
-		*pte |= PTE_SWAPPED;
-		*pte &= PTE_UNSET_PRESENT;
-		// save the disk slot :)
+	} 
+	/********************************* Update PTE **********************************/
+	u_int32_t *pte = get_PTE_from_addrspace(coremap[kicked_ass_page].addrspace,
+											coremap[kicked_ass_page].mapped_vaddr);
+	assert((*pte & PTE_PRESENT) != 0);
+	*pte |= PTE_SWAPPED;
+	*pte &= PTE_UNSET_PRESENT;
+	if (coremap[kicked_ass_page].state == DIRTY) {
 		*pte &= CLEAR_PAGE_FRAME;
 		*pte |= (disk_slot << 12);
-		// now the kicked ass entry
-		coremap[kicked_ass_page].state = CLEAN;
-		coremap[kicked_ass_page].mapped_vaddr = 0xDEADBEEF;
-		coremap[kicked_ass_page].addrspace = NULL;
-		coremap[kicked_ass_page].num_pages_allocated = 0;
-		return kicked_ass_page;
-	} else {
-		// page clean, no need for swap, just update the PTE and return
-		u_int32_t *pte = get_PTE_from_addrspace(coremap[kicked_ass_page].addrspace,
-							 coremap[kicked_ass_page].mapped_vaddr);
-		assert((*pte & PTE_PRESENT) != 0);
-		// set the SWAPPED bit and unset the PRESENT bit
-		*pte |= PTE_SWAPPED;
-		*pte &= PTE_UNSET_PRESENT;
-		// update the coremap to free
-		coremap[kicked_ass_page].state = CLEAN;
-		coremap[kicked_ass_page].mapped_vaddr = 0xDEADBEEF;
-		coremap[kicked_ass_page].addrspace = NULL;
-		coremap[kicked_ass_page].num_pages_allocated = 0;
-		return kicked_ass_page;
 	}
+	/********************************* Coremap Entry *******************************/
+	coremap[kicked_ass_page].state = CLEAN;
+	coremap[kicked_ass_page].mapped_vaddr = 0xDEADBEEF;
+	coremap[kicked_ass_page].addrspace = NULL;
+	return kicked_ass_page;
+	
+}
+
+int evict_or_swap_kernel(){
+	assert(curspl > 0);
+	int kicked_ass_page;
+	int i = 0;
+	for (; i < num_frames; i++){
+		if(coremap[i].state != FIXED) {
+			kicked_ass_page = i;
+			break;
+		}
+	}
+
+	int disk_slot;
+	if (coremap[kicked_ass_page].state == DIRTY) {
+		// page is dirty, swap out :)
+		bitmap_alloc(swapfile_map, &disk_slot);
+		// cannot exceed total_disk_slots pages
+		assert(disk_slot < total_disk_slots);
+		off_t disk_addr = disk_slot * PAGE_SIZE;
+		swap_out(kicked_ass_page, disk_addr);
+	} 
+	/********************************* Update PTE **********************************/
+	u_int32_t *pte = get_PTE_from_addrspace(coremap[kicked_ass_page].addrspace,
+											coremap[kicked_ass_page].mapped_vaddr);
+	assert((*pte & PTE_PRESENT) != 0);
+	*pte |= PTE_SWAPPED;
+	*pte &= PTE_UNSET_PRESENT;
+	if (coremap[kicked_ass_page].state == DIRTY) {
+		*pte &= CLEAR_PAGE_FRAME;
+		*pte |= (disk_slot << 12);
+	}
+	/********************************* Coremap Entry *******************************/
+	coremap[kicked_ass_page].state = CLEAN;
+	coremap[kicked_ass_page].mapped_vaddr = 0xDEADBEEF;
+	coremap[kicked_ass_page].addrspace = NULL;
+	return kicked_ass_page;
+	
 }
 
 /*
@@ -228,41 +246,29 @@ int evict_or_swap(){
 
 	int disk_slot;
 	if (coremap[kicked_ass_page].state == DIRTY) {
+		// page is dirty, swap out :)
 		bitmap_alloc(swapfile_map, &disk_slot);
-		// cannot exceed 1280 pages
-		assert(disk_slot <= 1280);
+		// cannot exceed total_disk_slots pages
+		assert(disk_slot < total_disk_slots);
 		off_t disk_addr = disk_slot * PAGE_SIZE;
 		swap_out(kicked_ass_page, disk_addr);
-		// update coremap entry
-		// update PTE of the *swapped* page and return frame id for loading/allocation
-		u_int32_t *pte = get_PTE_from_addrspace(coremap[kicked_ass_page].addrspace,
-								 coremap[kicked_ass_page].mapped_vaddr);
-		// set the SWAPPED bit and unset the PRESENT bit
-		*pte |= PTE_SWAPPED;
-		*pte &= PTE_UNSET_PRESENT;
-		// save the disk slot :)
+	} 
+	/********************************* Update PTE **********************************/
+	u_int32_t *pte = get_PTE_from_addrspace(coremap[kicked_ass_page].addrspace,
+											coremap[kicked_ass_page].mapped_vaddr);
+	assert((*pte & PTE_PRESENT) != 0);
+	*pte |= PTE_SWAPPED;
+	*pte &= PTE_UNSET_PRESENT;
+	if (coremap[kicked_ass_page].state == DIRTY) {
 		*pte &= CLEAR_PAGE_FRAME;
 		*pte |= (disk_slot << 12);
-		// now the kicked ass entry
-		coremap[kicked_ass_page].state = CLEAN;
-		coremap[kicked_ass_page].mapped_vaddr = 0xDEADBEEF;
-		coremap[kicked_ass_page].addrspace = NULL;
-		return kicked_ass_page;
-	} else {
-		// page clean, no need for swap, just update the PTE and return
-		u_int32_t *pte = get_PTE_from_addrspace(coremap[kicked_ass_page].addrspace,
-							 coremap[kicked_ass_page].mapped_vaddr);
-		assert((*pte & PTE_PRESENT) != 0);
-		// set the SWAPPED bit and unset the PRESENT bit, do NOT touch the first 
-		// 20 bits, they are the disk slot number
-		*pte |= PTE_SWAPPED;
-		*pte &= PTE_UNSET_PRESENT;
-		// update the coremap to free
-		coremap[kicked_ass_page].state = CLEAN;
-		coremap[kicked_ass_page].mapped_vaddr = 0xDEADBEEF;
-		coremap[kicked_ass_page].addrspace = NULL;
-		return kicked_ass_page;
 	}
+	/********************************* Coremap Entry *******************************/
+	coremap[kicked_ass_page].state = CLEAN;
+	coremap[kicked_ass_page].mapped_vaddr = 0xDEADBEEF;
+	coremap[kicked_ass_page].addrspace = NULL;
+	return kicked_ass_page;
+	
 }
 
 /*
@@ -305,25 +311,12 @@ paddr_t alloc_page_userspace(vaddr_t va) {
 	assert(curspl > 0);
 	// passed in virtual address shall be page-aligned
 	assert((va & PAGE_FRAME) == va);
-	int i = 0;
-	int kicked_ass_page = -1;
-	// go through the coremap check if there's a free page
-	for (; i < num_frames; i++) {
-		if (coremap[i].state == FREE) {
-			kicked_ass_page = i;
-			break;
-		}
-	}
-	if (kicked_ass_page == -1) {
-		// no free page available right now --> we need to evict/swap a page
-		// this makes room for the newly created page
-		kicked_ass_page = evict_or_swap();
-	}
-	assert(kicked_ass_page >= 0);
+	int kicked_ass_page = get_free_frame();
+
 	assert(coremap[kicked_ass_page].state == FREE || coremap[kicked_ass_page].state == CLEAN);
 	// now update coremap entry
 	coremap[kicked_ass_page].addrspace = curthread->t_vmspace;
-	coremap[kicked_ass_page].state = DIRTY; 
+	coremap[kicked_ass_page].state = DIRTY; // newly allocated user page shall start DIRTY
 	coremap[kicked_ass_page].mapped_vaddr = va;
 	coremap[kicked_ass_page].num_pages_allocated = 1;
 	return coremap[kicked_ass_page].frame_start;
@@ -335,77 +328,49 @@ paddr_t alloc_page_userspace(vaddr_t va) {
 	** updates coremap entry && PTE
 */
 void evict_or_swap_multiple(int starting_frame, size_t npages){
+	assert(curspl > 0);
 	int i;
 	for (i = starting_frame; i < npages + starting_frame; i++) {
 		// come on, don't let me down...
 		assert(coremap[i].state != FIXED);
+		int disk_slot;
 		if (coremap[i].state == DIRTY) {
-			int disk_slot;
-			// find a free slot in swapfile
+			// page is dirty, swap out :)
 			bitmap_alloc(swapfile_map, &disk_slot);
-					assert(disk_slot <= 1280);
-
+			// cannot exceed total_disk_slots pages
+			assert(disk_slot < total_disk_slots);
 			off_t disk_addr = disk_slot * PAGE_SIZE;
 			swap_out(i, disk_addr);
-			// update PTE of the *swapped* page and return frame id for loading/allocation
-			u_int32_t *pte = get_PTE_from_addrspace(coremap[i].addrspace,
-									 coremap[i].mapped_vaddr);
-			// set the SWAPPED bit and unset the PRESENT bit
-			*pte |= PTE_SWAPPED;
-			*pte &= PTE_UNSET_PRESENT;
-			// save the disk slot :)
+		} 
+		/********************************* Update PTE **********************************/
+		u_int32_t *pte = get_PTE_from_addrspace(coremap[i].addrspace,
+												coremap[i].mapped_vaddr);
+		assert((*pte & PTE_PRESENT) != 0);
+		*pte |= PTE_SWAPPED;
+		*pte &= PTE_UNSET_PRESENT;
+		if (coremap[i].state == DIRTY) {
 			*pte &= CLEAR_PAGE_FRAME;
 			*pte |= (disk_slot << 12);
-			// now the kicked ass entry
-			coremap[i].state = CLEAN;
-			coremap[i].mapped_vaddr = 0xDEADBEEF;
-			coremap[i].addrspace = NULL;
-			coremap[i].num_pages_allocated = 0;
-		} else {
-			// page clean, no need for swap
-			// deallocate the page
-			coremap[i].addrspace = NULL;
-			coremap[i].state = FREE;
-			coremap[i].mapped_vaddr = 0xDEADBEEF;
-			coremap[i].num_pages_allocated = 0;
-			// update PTE of the *swapped* page and return frame id for loading/allocation
-			u_int32_t *pte = get_PTE_from_addrspace(coremap[i].addrspace,
-									 coremap[i].mapped_vaddr);
-			// set SWAPPED = 1 and PRESENT = 0
-			*pte &= PTE_SWAPPED;	 
-			*pte &= PTE_UNSET_PRESENT;
 		}
-	}
-	return;
+		/********************************* Coremap Entry *******************************/
+		coremap[i].state = CLEAN;
+		coremap[i].mapped_vaddr = 0xDEADBEEF;
+		coremap[i].addrspace = NULL;
+	}	
 }
+
+/*
+	For allocating pages in kernel space
+*/
 
 vaddr_t alloc_one_page() {
 	assert(curspl > 0);
-	int i = 0;
-	// go through the coremap check if there's a free page
-	int kicked_ass_page = -1;
-	// go through the coremap check if there's a free page
-	for (; i < num_frames; i++) {
-		if (coremap[i].state == FREE) {
-			kicked_ass_page = i;
-			break;
-		}
-	}
-	if (kicked_ass_page == -1) {
-		// no free page available right now --> we need to evict/swap a page
-		// this makes room for the newly created page
-		kicked_ass_page = evict_or_swap();
-	}
-	assert(kicked_ass_page >= 0);
+	int kicked_ass_page = get_free_frame_kernel();	
 	// now do the allocation
 	coremap[kicked_ass_page].addrspace = curthread->t_vmspace;
 	coremap[kicked_ass_page].state = FIXED; // keep kernel pages in memory
-	// if this is invoked by kmalloc, then the virtual address must be mapped by PADDR_TO_KVADDR
 	coremap[kicked_ass_page].mapped_vaddr = PADDR_TO_KVADDR(coremap[kicked_ass_page].frame_start);
 	coremap[kicked_ass_page].num_pages_allocated = 1;
-	// zero out this page
-	// as_zero_page(coremap[kicked_ass_page].frame_start);
-	num_fixed_page++;
 	return (coremap[kicked_ass_page].mapped_vaddr);
 }
 /*
@@ -436,7 +401,6 @@ vaddr_t alloc_npages(int npages) {
 			coremap[j].mapped_vaddr = PADDR_TO_KVADDR(coremap[j].frame_start);
 			// redundancy not a problem ;)
 			coremap[j].num_pages_allocated = npages; 
-			num_fixed_page++;
 		}
 		assert(coremap[start].mapped_vaddr == PADDR_TO_KVADDR(coremap[start].frame_start));
 		return PADDR_TO_KVADDR(coremap[start].frame_start);
@@ -462,15 +426,15 @@ vaddr_t alloc_npages(int npages) {
 		int starting_frame = i - npages + 1;
 		// sanity check
 		int j = starting_frame;
-		for (; j < starting_frame + npages; i++) {
+		for (; j < starting_frame + npages; j++) {
 			if (coremap[j].state == FIXED) 
 				panic("alloc_npages contains a fixed page"); 
 		}
 		// evict/swap all pages to disk
 		evict_or_swap_multiple(starting_frame, npages);
 		// sanity check: these npages shall now be free or clean
-		for (; i < npages; i++) {
-			if (coremap[i + starting_frame].state != CLEAN || coremap[i + starting_frame].state != FREE) 
+		for (i = starting_frame; i < npages + starting_frame; i++) {
+			if (coremap[i].state != CLEAN || coremap[i].state != FREE) 
 				panic("alloc_npages after evict/swap contains a non-free page"); 
 		}
 		// allocation
@@ -479,7 +443,6 @@ vaddr_t alloc_npages(int npages) {
 			coremap[i].state = FIXED;
 			coremap[i].mapped_vaddr = PADDR_TO_KVADDR(coremap[i].frame_start);
 			coremap[i].num_pages_allocated = npages; 
-			num_fixed_page++;
 		}
 		return PADDR_TO_KVADDR(coremap[starting_frame].frame_start);
 	}
@@ -523,6 +486,7 @@ free_kpages(vaddr_t addr)
 			int numpage_to_free = coremap[i].num_pages_allocated;
 			int j;
 			for (j = 0; j < numpage_to_free; j++) {
+				coremap[j + i].mapped_vaddr = 0xDEADBEEF;
 				coremap[j + i].state = FREE;
 				coremap[j + i].num_pages_allocated = 0;
 			}
@@ -586,12 +550,7 @@ vm_fault(int faulttype, vaddr_t faultaddress)
 
 	unsigned int permissions = 0;
 	vaddr_t vbase, vtop;
-	/*************************************************************************************************************/
-	// struct uio u;
-	// mk_kuio(&u, kernbuf2, PAGE_SIZE, 0, UIO_READ);
-	// if(VOP_READ(swap_file, &u)){
-	// 	panic("VOP_WRITE failed");
-	// }	
+
 	/*********************************** Check the validity of the faulting address ******************************/
 	int i = 0;
 	int found = 0;
@@ -657,11 +616,11 @@ vm_fault(int faulttype, vaddr_t faultaddress)
 /*
 	Do the right thing, since the faulting address has been validated
 */
-int handle_vaddr_fault (vaddr_t faultaddress, unsigned int permissions) {
+int handle_vaddr_fault(vaddr_t faultaddress, unsigned int permissions) {
 
 	int spl = splhigh();
 	vaddr_t vaddr;
-	paddr_t physical_PN, paddr;
+	paddr_t paddr;
  
 	int level1_index = (faultaddress & FIRST_LEVEL_PN) >> 22; 
 	int level2_index = (faultaddress & SEC_LEVEL_PN) >> 12;
@@ -675,44 +634,28 @@ int handle_vaddr_fault (vaddr_t faultaddress, unsigned int permissions) {
 		if (*pte & PTE_PRESENT) {
 			// page is present in physical memory, meaning this is merely a TLB miss,
 			// so we just load the mapping into TLB
-			assert((*pte & PAGE_FRAME) != 0xdeadb); // the physical frame number should be valid
+			assert((*pte & PTE_SWAPPED) == 0); // a page that is present cannot at the same time be swapped
 			paddr = *pte & PHY_PAGENUM; 
 		} else {
 			// if page is not present, one case is that the page was swapped out...
 			if (*pte & PTE_SWAPPED) { 
-				// find a free frame and load it back
-				int i = 0, found = 0;
-				for (; i < num_frames; i++) {
-					if (coremap[i].state == FREE){
-						found = 1;
-						load_page(curthread->t_vmspace, vaddr, i);
-						paddr = coremap[i].frame_start;
-						break;
-					}
-				}
-				// no free frame found, make one :)
-				if(!found) {
-					int free_frame = evict_or_swap();
-					load_page(curthread->t_vmspace, faultaddress, free_frame);
-					paddr = coremap[free_frame].frame_start;
-				}
+
+				paddr = load_swapped_page(curthread->t_vmspace, faultaddress);
+
 			} else {
-				// PTE neither PRESENT nor SWAPPED, meaning this page does not exist, so we allocate one
-			    assert((*pte & PTE_PRESENT) == 0);
-			    assert((*pte & PTE_SWAPPED) == 0); // come on, we just allocated it, can't be in the swapfile ;)
+				// ... the other case is that the page does not exist
 				paddr = alloc_page_userspace(faultaddress);
 			}
-			// once we're here, we have a valid physical page in mem
 			// now udpate the PTE with the physical frame number and PRESENT bit
 			assert((paddr & PAGE_FRAME) == paddr);
 			*pte &= CLEAR_PAGE_FRAME;
 			*pte |= paddr;
 	    	*pte |= PTE_PRESENT;
-	    	*pte |= PTE_UNSET_SWAPPED;
+	    	*pte &= PTE_UNSET_SWAPPED;
 		}
 	} else {
 		/************************************* 2nd Level Pagetable DNE ***************************************/
-		// If second page table doesn't exists, create second page table --> demand paging part
+		// If second page table doesn't exist, create one --> demand paging part
 		curthread->t_vmspace->as_master_pagetable[level1_index] = kmalloc(sizeof(struct as_pagetable));
 		level2_pagetable = curthread->t_vmspace->as_master_pagetable[level1_index];
 		assert(level2_pagetable != NULL);
@@ -722,8 +665,8 @@ int handle_vaddr_fault (vaddr_t faultaddress, unsigned int permissions) {
 			level2_pagetable->PTE[i] = 0;
 		}
 	    // allocate a page and do the mapping
-	    physical_PN = alloc_page_userspace(faultaddress);
-	    assert(physical_PN % PAGE_SIZE == 0);
+	    paddr = alloc_page_userspace(faultaddress);
+	    assert(paddr % PAGE_SIZE == 0);
 		
 	    // update pte: PRESENT = 1
 	    u_int32_t* pte = get_PTE(curthread, faultaddress); 
@@ -731,14 +674,13 @@ int handle_vaddr_fault (vaddr_t faultaddress, unsigned int permissions) {
 	    assert((*pte & PTE_PRESENT) == 0);
 	    assert((*pte & PTE_SWAPPED) == 0);
 	    assert((*pte & PAGE_FRAME) == 0); // it can't have a frame number now
-
+		
+		*pte &= CLEAR_PAGE_FRAME;
+		*pte &= PTE_UNSET_SWAPPED;
 	    *pte |= PTE_PRESENT;
-	    // update pte: physical frame number (first 20 bits)
-	    *pte |= physical_PN;
+	    *pte |= paddr;
 	    // consistent?
 	    assert(*pte == level2_pagetable->PTE[level2_index]);
-	    // and prepare the physical address for loading the TLB
-	    paddr = physical_PN;
 	}
 
 	/* once we are here, it means that we can guarantee that there exists PTE in page table for faultaddress.
@@ -795,25 +737,28 @@ void swap_out(int frame_id, off_t pos) {
 	paddr_t dest = coremap[frame_id].frame_start;
 	// initialize the uio
 	assert((PADDR_TO_KVADDR(dest) % 512) == 0);
+
 	assert(pos % 512 == 0);
-	assert(pos / 4096 <= 1280);
+	assert(pos / 4096 < total_disk_slots);
+
 	mk_kuio(&u, PADDR_TO_KVADDR(dest), PAGE_SIZE, pos, UIO_WRITE);
 	// does the actual write
-	int result = VOP_WRITE(swap_file, &u);
-	if(result){
-		kprintf("failed at frame = %d, and pos = %d\n", frame_id, pos);
+	if (VOP_WRITE(swap_file, &u)){
 		panic("write page to disk failed");
 	}
-	// invalidate the TLB entry of this swapped page
-	u_int32_t tlb_hi, tlb_low;
-	int k = 0;	
-	for(; k< NUM_TLB; k++){
-		TLB_Read(&tlb_hi, &tlb_low, k);
-		if(((tlb_hi & PAGE_FRAME) == coremap[frame_id].mapped_vaddr) 
-			&& ((tlb_low & PAGE_FRAME) == coremap[frame_id].frame_start)){
-			// found it
-			TLB_Write(TLBHI_INVALID(k), TLBLO_INVALID(), k);
-		}
+	// invalidate the TLB entry of this swapped page, if found
+	// u_int32_t tlb_hi, tlb_low;
+	// int k = 0;	
+	// for(; k< NUM_TLB; k++){
+	// 	TLB_Read(&tlb_hi, &tlb_low, k);
+	// 	if(((tlb_hi & PAGE_FRAME) == coremap[frame_id].mapped_vaddr) 
+	// 		&& ((tlb_low & PAGE_FRAME) == coremap[frame_id].frame_start)){
+	// 		TLB_Write(TLBHI_INVALID(k), TLBLO_INVALID(), k);
+	// 	}
+	// }
+	int i;
+	for (i = 0; i < NUM_TLB; i++) {
+		TLB_Write(TLBHI_INVALID(i), TLBLO_INVALID(), i);
 	}
 	return;
 }
@@ -852,18 +797,21 @@ paddr_t fetch_page(struct addrspace* as, vaddr_t va){
 	PTE or page table
 */
 void load_page(struct addrspace* addrspace, vaddr_t vaddr, int frame_id) {
+	assert(curspl > 0);
 	u_int32_t *pte = get_PTE_from_addrspace(addrspace, vaddr); 
 	assert(pte != NULL);
 	// the first 20 bits is the slot of the page in swapfile
 	off_t pos = ((*pte & SWAPFILE_OFFSET) >> 12) * PAGE_SIZE; 
 	struct uio u;
 	// the destination address is the frame start
-	paddr_t src = coremap[frame_id].frame_start;
-	assert(PADDR_TO_KVADDR(src) % 512 == 0);
+	paddr_t dest = coremap[frame_id].frame_start;
+	// aligned?
+	assert(PADDR_TO_KVADDR(dest) % 512 == 0);
 	assert(pos % 512 == 0);
-	mk_kuio(&u, PADDR_TO_KVADDR(src), PAGE_SIZE, pos, UIO_READ);
-	int result = VOP_READ(swap_file, &u);
-	if (result) {
+
+	mk_kuio(&u, PADDR_TO_KVADDR(dest), PAGE_SIZE, pos, UIO_READ);
+
+	if(VOP_READ(swap_file, &u)) {
 		panic("load page from disk failed");
 	}
 	// update coremap entry
@@ -909,3 +857,58 @@ void background_paging(void * args, unsigned int argc) {
 	splx(spl);
 }
 
+
+/*
+	Function that finds a free/clean frame, evict/swap if necessary
+*/
+int get_free_frame() {
+		assert(curspl > 0);
+
+	int i = 0, free_frame = -1;
+	for (; i < num_frames; i++) {
+		if (coremap[i].state == FREE){
+			free_frame = i;
+			break;
+		}
+	}
+
+	if(free_frame == -1){
+		free_frame = evict_or_swap();
+	}
+	return free_frame;
+}
+
+int get_free_frame_kernel() {
+	assert(curspl > 0);
+
+	int i = 0, free_frame = -1;
+	for (; i < num_frames; i++) {
+		if (coremap[i].state == FREE){
+			free_frame = i;
+			break;
+		}
+	}
+
+	if(free_frame == -1){
+		free_frame = evict_or_swap_kernel();
+	}
+	return free_frame;
+}
+
+
+
+/* 
+	Function that loads a specified page from swapfile, evict/swap if necessary.
+	@return physical address of the loaded page in mem
+*/
+
+paddr_t load_swapped_page(struct addrspace* as, vaddr_t va){
+		assert(curspl > 0);
+
+	int free_frame = get_free_frame();
+	assert(coremap[free_frame].state == CLEAN || coremap[free_frame].state == FREE);
+	// load the page into this frame
+	load_page(as, va, free_frame);
+	assert(coremap[free_frame].state == DIRTY);
+	return coremap[free_frame].frame_start;
+}
