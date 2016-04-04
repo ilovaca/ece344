@@ -149,6 +149,7 @@ runprogram_exev(char *progname, char* args[], int nargs)
 	int j;
    	for(j = 0; j < narg; ++j){
 	    int len = 1 + strlen(args[j]);
+	    // len = ROUNDUP(len, 8);
 		stackptr -= len;
 
 		result = copyoutstr(args[j],(userptr_t)stackptr, len, &len); 
@@ -161,7 +162,7 @@ runprogram_exev(char *progname, char* args[], int nargs)
 
     args[narg] = NULL;
 
-    size_t arg_size = (narg+1)*sizeof(char*);
+    size_t arg_size = (narg + 1) * sizeof(char*);
     // align the stackptr to 8 byte aligned
     stackptr -= arg_size;
     stackptr -= stackptr % 8;

@@ -54,6 +54,9 @@ as_create(void)
 		2. all pages in swap file
 	Note: do deep copy
 */
+
+	#define PTE_UNSET_PRESENT 0xfffff7ff
+
 int
 as_copy(struct addrspace *old, struct addrspace **ret)
 {
@@ -147,7 +150,7 @@ as_destroy(struct addrspace *as)
 {
 	int spl = splhigh();
 	int i = 0;
-	// free all coremap entries
+	//free all coremap entries
 	for (; i < num_frames; i++) {
 		if(coremap[i].state != FREE && coremap[i].addrspace == as){
 			coremap[i].addrspace = NULL;
@@ -174,11 +177,49 @@ as_destroy(struct addrspace *as)
 				bitmap_unmark(swapfile_map, file_slot);
 			}
 		}
-	}	
-	// free regions
+	}
+	/*************************** Walk through Page table and free pages ***************************/
+	// for (i = 0; i < FIRST_LEVEL_PT_SIZE; i++) {
+
+	// 	if(as->as_master_pagetable[i] != NULL) {
+	// 		unsigned int j = 0;
+	// 		struct as_pagetable* src_pt = as->as_master_pagetable[i];
+	// 		for (; j < SECOND_LEVEL_PT_SIZE; j++) {
+				
+	// 			if(src_pt->PTE[j] & PTE_PRESENT) {
+	// 				// free the page in mem
+	// 				paddr_t pa = (src_pt->PTE[j] & PAGE_FRAME);
+	// 				vaddr_t va = (i << 22) + (j << 12);
+	// 				int k = 0;
+	// 				for (; k < num_frames; k++) {
+	// 					if (coremap[k].frame_start == pa) {
+	// 						assert(coremap[k].mapped_vaddr == va);
+	// 						coremap[k].addrspace = NULL;
+	// 						coremap[k].mapped_vaddr = 0;
+	// 						coremap[k].state = FREE;
+	// 						coremap[k].num_pages_allocated = 0;
+	// 						break;
+	// 					}
+	// 				}
+	// 				src_pt->PTE[j] &= PTE_UNSET_PRESENT;
+	// 			} else if (src_pt->PTE[j] & PTE_SWAPPED){
+	// 				// free the bitmap
+	// 				off_t file_slot = (src_pt->PTE[j] & SWAPFILE_OFFSET) >> 12;
+	// 				bitmap_unmark(swapfile_map,file_slot);
+	// 				src_pt->PTE[j] &= PTE_UNSET_PRESENT;
+	// 			} else {
+	// 				// neither PRESENT of SWAPPED, skip 
+	// 			}
+	// 		}
+	// 	}
+	// }
+
+
+	/*************************** Free Internals *************************/
+	// first all regions
 	array_destroy(as->as_regions);
 	// free 2nd level page tables
-	for(i = 0; i < SECOND_LEVEL_PT_SIZE; i++) {
+	for(i = 0; i < FIRST_LEVEL_PT_SIZE; i++) {
 		if(as->as_master_pagetable[i] != NULL)
 			kfree(as->as_master_pagetable[i]);
 	}

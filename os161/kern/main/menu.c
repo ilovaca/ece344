@@ -74,11 +74,12 @@ cmd_progthread(void *ptr, unsigned long nargs)
 
 	strcpy(progname, args[0]);
 
-	if(nargs > 1)
-		result = runprogram_exev(progname, args, nargs);
-	else
-		result = runprogram(progname);
+	// if(nargs > 1)
+	// 	result = runprogram_exev(progname, args, nargs);
+	// else
+	// 	result = runprogram(progname);
 
+	result = runprogram_exev(progname, args, nargs);
 	if (result) {
 		kprintf("Running program %s failed: %s\n", args[0],
 			strerror(result));

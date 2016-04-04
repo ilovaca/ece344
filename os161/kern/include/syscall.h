@@ -19,7 +19,7 @@ int sys__exit(int , int32_t* );
 
 int sys_read(struct trapframe *, int32_t *);
 
-int sys_write(struct trapframe *, int32_t *);
+int sys_write(int fd, char* c, size_t size, int* retval);
 
 int sys_sbrk(int increment, int32_t*);
 

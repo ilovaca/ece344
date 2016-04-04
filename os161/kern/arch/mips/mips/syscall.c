@@ -86,6 +86,7 @@ mips_syscall(struct trapframe *tf)
 		err = sys_reboot(tf->tf_a0);
 		break;
 		case SYS_execv:
+		// err = sys_execv_(tf);
 		err = sys_execv(tf->tf_a0, tf->tf_a1);
 		break;
 		case SYS_fork:
@@ -104,7 +105,8 @@ mips_syscall(struct trapframe *tf)
 		err = sys_read(tf, &retval);
 		break;
 		case SYS_write:
-		err = sys_write(tf, &retval);
+		// err = sys_write(tf, &retval);
+		err = sys_write(tf->tf_a0, tf->tf_a1, tf->tf_a2, &retval);
 		break;
 		case SYS_sbrk:
 		err = sys_sbrk(tf->tf_a0, &retval);
@@ -417,69 +419,33 @@ int sys_read(struct trapframe * tf, int32_t* retval)
 
 
 
-int sys_write(struct trapframe * tf, int32_t* retval) { 
-	int fd = tf->tf_a0;
-	char * user_buf = (char*)tf->tf_a1;
-	int write_count = tf->tf_a2;
-	char * kernel_buf = kmalloc(sizeof(char) * write_count);
-	if (kernel_buf == NULL) {
-		return ENOMEM;
-	}
-	if (fd != 1) {
-		// must be STDOUT
-		return EINVAL;
+int sys_write(int fd, char* c, size_t size, int* retval) {
+	int spl = splhigh();
+  	(void*) fd;
+	if(size == 1){
+		char buf[2];
+	    buf[0] = *c;
+	    buf[1] = '\0';
+	    kprintf("%s",buf);
+	    splx(spl);
+	    return 0;
 	} else {
-		
-		copyin((const_userptr_t)user_buf, kernel_buf, write_count);
+		char * kernel_buf = kmalloc(sizeof(char) * (size + 1));
+		copyin((const_userptr_t)c, kernel_buf, size);
+		kernel_buf[size] = '\0';
 		int i = 0;
-		for(; i < write_count; i++){
-			kprintf("%c", kernel_buf[i]);	
+		for(; i < size; i++){
+			// kprintf("%c", kernel_buf[i]);	
+			putch(kernel_buf[i]);
 		}
-		*retval = write_count;
+		*retval = size;
 		kfree(kernel_buf);
-		return 0;
+		splx(spl);
+	    return 0;
 	}
 }
 
 
-
-// int sys_execv(struct trapframe* tf){
-// 	return 0;
-// }
-
-/*
-int sys_execv(struct trapframe* tf){
-	//clear the current thread's address space
-
-	int char_count = 0;
-	// kernel buf for program path
-	char* prog_path = kmalloc(sizeof(char) * MAX_ARG_LEN);
-	int result = copyinstr((const_userptr_t) tf->tf_a0, (void *)prog_path, MAX_ARG_LEN, &char_count);
-	if (result) {
-		kfree(prog_path);
-		return result;
-	}
-
-	// kernel buf for program args (char **)
-	char** argv = kmalloc(sizeof(char*) * MAX_ARGC);
-	int i = 0;
-	for (; i< MAX_ARGC; i++){
-		argv[i] = kmalloc(sizeof(char) * MAX_ARG_LEN);
-	}
-	int argc = 0;
-	int num_read = 0;
-	do {
-		copyinstr((const_userptr_t)tf->tf_a1, (void *)argv[argc], MAX_ARG_LEN, &num_read);
-		if (num_read != 0) argc++; //tf_a1 stores a pointer.
-	} while (num_read != 0);
-
-	assert(curthread->t_vmspace != NULL);
-	as_destroy(curthread->t_vmspace);
-	// prog_path and argv is in kernel
-	runprogram_exev(prog_path, argv, argc);
-
-}
-*/
 #define MAX_PATH_LEN 128
 int sys_execv(const char *prog_path, char **args) {
 	int spl = splhigh();
@@ -487,6 +453,7 @@ int sys_execv(const char *prog_path, char **args) {
 	if(prog_path == NULL) {
 		return EINVAL;
 	}
+	// frist the program path
 	char* program = (char *) kmalloc(MAX_PATH_LEN * sizeof(char));
 	int size;
 	int result = copyinstr((const_userptr_t) prog_path, program, MAX_PATH_LEN, &size);
@@ -494,15 +461,16 @@ int sys_execv(const char *prog_path, char **args) {
 		kfree(program);
 		return EFAULT;
 	}
-
+	// arguments
 	char** argv = (char**) kmalloc(sizeof(char**));
+	// char** argv;
 	result = copyin((const_userptr_t)args, argv, sizeof(char **));
 	if(result) {
 		kfree(program);
 		kfree(argv);
 		return EFAULT;
 	}
-
+	// count the number of arguments
 	int i = 0;
 	while(args[i] != NULL){
 		argv[i] = (char*) kmalloc(sizeof(char) * MAX_ARG_LEN);
@@ -557,110 +525,29 @@ int sys_execv(const char *prog_path, char **args) {
 		return result;
 	}
 
-	/******************* copy kernel args to user stack *****************/
-	// int j = 0;
-	// while(argv[j] != NULL){
-	// 	int len = 1 + strlen(argv[j]);
-	// 	len = ROUNDUP(len, 4);
-	// 	stackptr -= len;
-	// 	result = copyoutstr(argv[j],(userptr_t)stackptr, len, &len); 
-	// 	if(result){
-	// 		return result;
-	// 	}
-	// 	// this is fucking weird...
-	// 	argv[j] = (char*)stackptr;
-	// 	j++;
-	// }
-
-	// argv[j] = NULL;
-	// size_t arg_size = j * sizeof(char*);
-	// stackptr -= arg_size;
-	// stackptr -= stackptr % 8;
-	// copyout(argv, stackptr, arg_size);
-
-	/*******************************************************************/
-	// the argument strings
-	int j = 0; 
-	for (j = i - 1; j >= 0; j--) {
-		int len = 1 + strlen(argv[j]);
-		len = ROUNDUP(len, 8);
+	int narg = i - 1;
+	int j;
+	for(j = 0; j < narg; ++j){
+	    int len = 1 + strlen(argv[j]);
+	    len = ROUNDUP(len, 8);
 		stackptr -= len;
-		assert(stackptr % 8 == 0);
-		char* a = argv[j];
-		argv[j] = stackptr;
-		result = copyoutstr(a,(userptr_t)stackptr, len, &len); 
-	}
-	// then the pointers to arguments
-	argv[i] = NULL;
-	stackptr -= i * sizeof(char *);
-	stackptr -= stackptr % 8;
-	assert(stackptr % 8 == 0);
-	copyout(argv, stackptr, i * sizeof(char*));
 
+		result = copyoutstr(argv[j],(userptr_t)stackptr, len, &len); 
+		if(result){
+			return result;
+		}	
+		argv[j] = (char*)stackptr;
+    }
 
+    argv[i] = NULL;
+    size_t arg_size = (narg + 1) * sizeof(char*);
+    arg_size = ROUNDUP(arg_size, 8);
+    // align the stackptr to 8 byte aligned
+    stackptr -= arg_size;
+    // stackptr -= stackptr % 8;
+
+    copyout(argv, stackptr, (narg + 1) * 4);
 	md_usermode(i, stackptr, stackptr, entrypoint); 
-	panic("md_usermode returned\n");
-	return EINVAL;
-
-
-	/*char** args = argv;
-	int index = 0;
-	while (args[index] != NULL ) {
-		char * arg;
-		int len = strlen(args[index]) + 1; // +1 for Null terminator \0
-
-		int oglen = len;
-		if (len % 4 != 0) {
-			len = len + (4 - len % 4);
-		}
-
-		arg = kmalloc(sizeof(len));
-		arg = kstrdup(args[index]);
-		
-		for ( i = 0; i < len; i++) {
-
-			if (i >= oglen)
-				arg[i] = '\0';
-			else
-				arg[i] = args[index][i];
-		}
-
-		stackptr -= len;
-
-		result = copyout((const void *) arg, (userptr_t) stackptr,
-				(size_t) len);
-		if (result) {
-			//kprintf("EXECV- copyout1 failed %d\n",result);
-			kfree(program);
-			kfree(args);
-			kfree(arg);
-			return result;
-		}
-
-		kfree(arg);
-		args[index] = (char *) stackptr;
-
-		index++;
-	}
-
-	if (args[index] == NULL ) {
-		stackptr -= 4 * sizeof(char);
-	}
-
-	for ( i = (index - 1); i >= 0; i--) {
-		stackptr = stackptr - sizeof(char*);
-		result = copyout((const void *) (args + i), (userptr_t) stackptr,
-				(sizeof(char *)));
-		if (result) {
-			//kprintf("EXECV- copyout2 failed, Result %d, Array Index %d\n",result, i);
-			kfree(program);
-			kfree(args);
-			return result;
-		}
-	}*/
-
-
-	//md_usermode(index, stackptr, stackptr, entrypoint); 
 	panic("md_usermode returned\n");
 	return EINVAL;
 }
